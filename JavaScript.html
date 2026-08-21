@@ -372,6 +372,31 @@ async function renderDashboard() {
     setTxt('pay-paid-count', paidCount + ' ฉบับ');
     setTxt('pay-paid-value', 'รับแล้ว ฿' + fmtShort(paidValue));
     setTxt('pay-unpaid-count', unpaidCount + ' ฉบับ');
+
+    /* ยอดขายตลอดปีภาษี — IV/RE/RC ไม่รวมยกเลิก ในช่วงรอบบัญชีปัจจุบัน */
+    const fcfg = fiscalCfg();
+    const nowD = new Date();
+    const p2 = n => (n < 10 ? '0' : '') + n;
+    const iso = dt => dt.getFullYear() + '-' + p2(dt.getMonth() + 1) + '-' + p2(dt.getDate());
+    let fs, fe;
+    if (fcfg.mode === 'fiscal') {
+        const sm = Number(fcfg.startMonth) || 1, sd = Number(fcfg.startDay) || 1;
+        let sy = nowD.getFullYear();
+        if (nowD.getMonth() + 1 < sm || ((nowD.getMonth() + 1) === sm && nowD.getDate() < sd)) sy--;
+        fs = iso(new Date(sy, sm - 1, sd));
+        fe = iso(new Date(new Date(sy + 1, sm - 1, sd).setDate(new Date(sy + 1, sm - 1, sd).getDate() - 1)));
+    } else {
+        fs = nowD.getFullYear() + '-01-01';
+        fe = nowD.getFullYear() + '-12-31';
+    }
+    let fyVal = 0, fyCount = 0;
+    docs.forEach(x => {
+        if (x.docType !== 'QT' && x.status !== 'Cancelled' && x.docDate >= fs && x.docDate <= fe) {
+            fyVal += Number(x.grandTotal) || 0; fyCount++;
+        }
+    });
+    setTxt('kpi-fiscal-sales', '฿' + fmtShort(fyVal));
+    setTxt('kpi-fiscal-range', fmtDateTH(fs) + ' – ' + fmtDateTH(fe) + ' (' + fyCount + ' เอกสาร)');
     setTxt('pay-unpaid-value', 'คงค้าง ฿' + fmtShort(unpaidValue));
     setTxt('kpi-re-issued', reIssued + ' ฉบับ');
     setTxt('kpi-re-issued-value', 'มูลค่า ฿' + fmtShort(reIssuedVal));
