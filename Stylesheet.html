@@ -31,8 +31,22 @@
         box-sizing: border-box;
         display: flex;
         flex-direction: column;
-        justify-content: space-between;
     }
+
+    /* ส่วนท้ายเอกสาร: ดันไปติดขอบล่างกระดาษเสมอ เนื้อหาด้านบนจึงเรียงชิดกัน */
+    .a4-footer {
+        margin-top: auto;
+        padding-top: 12px;
+        border-top: 1px solid #cbd5e1;
+    }
+
+    /* กล่องข้อมูลลูกค้า: ต่อเนื่องล็อกกับตารางรายการสินค้าพอดี */
+    .a4-customer-box {
+        border-bottom-left-radius: 0;
+        border-bottom-right-radius: 0;
+        border-bottom: none;
+    }
+    .a4-items-table thead tr:first-child th { border-top: none; }
 
     @media (max-width: 900px) {
         .a4-page {
