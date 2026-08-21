@@ -1033,6 +1033,9 @@ function renderDocListTable() {
             d.docType === 'RC' ? 'text-purple-800 bg-purple-50 border-purple-200' :
             'text-slate-700 bg-slate-100 border-slate-200'}">${TYPE_LABELS[d.docType] || d.docType}</span>`;
 
+        /* IV ที่ชำระครบแล้ว → ซ่อนปุ่ม 💰 (รับชำระ) */
+        const ivPaidFull = d.docType === 'IV' && d.paidInfo && d.paidInfo.total >= (Number(d.grandTotal) || 0) - 0.01;
+
         return `
         <tr class="hover:bg-slate-50">
             <td class="p-3 font-mono font-bold text-slate-800 text-xs">${esc(d.docNo)}</td>
@@ -1046,7 +1049,7 @@ function renderDocListTable() {
                 <button onclick="viewDocPreview('${esc(d.docNo)}')" class="text-xs font-bold text-slate-600 hover:text-emerald-600" title="พรีวิว/พิมพ์">🖨️</button>
                 ${d.status === 'Active' ? `<button onclick="editDocument('${esc(d.docNo)}')" class="text-xs font-bold text-blue-600 hover:underline" title="แก้ไข">✏️</button>` : ''}
                 ${d.docType === 'QT' && d.status === 'Active' ? `<button onclick="convertQtToBilling('${esc(d.docNo)}')" class="text-xs font-bold text-indigo-600 hover:underline" title="สร้างใบวางบิล">➡️IV</button>` : ''}
-                ${d.docType === 'IV' && d.status === 'Active' ? `<button onclick="promptAddPayment('${esc(d.docNo)}')" class="text-xs font-bold text-emerald-600 hover:underline" title="บันทึกรับชำระเงิน">💰</button>` : ''}
+                ${d.docType === 'IV' && d.status === 'Active' && !ivPaidFull ? `<button onclick="promptAddPayment('${esc(d.docNo)}')" class="text-xs font-bold text-emerald-600 hover:underline" title="บันทึกรับชำระเงิน">💰</button>` : ''}
                 ${d.docType === 'IV' && d.status === 'Active' ? `<button onclick="convertBillingToReceipt('${esc(d.docNo)}')" class="text-xs font-bold text-purple-600 hover:underline" title="ออกใบเสร็จ (ต้องชำระครบก่อน)">➡️RE</button>` : ''}
                 ${d.status !== 'Cancelled' ? `<button onclick="cancelDocumentPrompt('${esc(d.docNo)}')" class="text-xs font-bold text-rose-500 hover:text-rose-700" title="ยกเลิก">✕</button>` : ''}
                 <button onclick="exportSinglePdf('${esc(d.docNo)}')" class="text-xs font-bold text-purple-600 hover:underline" title="Export PDF">📄</button>
