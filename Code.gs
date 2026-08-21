@@ -1327,7 +1327,7 @@ function apiConvertBillingToReceipt(token, ivDocNo) {
 
   /* คัดลอกประวัติการชำระเงินของ IV มาผูกกับใบเสร็จ RE ด้วย → พิมพ์ใบเสร็จแยกได้สมบูรณ์ */
   getPaymentsOf_(iv.docNo).forEach(function(p) {
-    recordPayment_(p.createdBy || s.userName, receipt.docNo, p.payDate, p.amount, p.method, p.detail);
+    recordPayment_(p.createdBy || s.userName, receipt.docNo, p.payDate, p.amount, p.method, p.detail, p.note || '');
   });
 
   const sh = sheet_('Documents');

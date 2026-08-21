@@ -1027,6 +1027,27 @@ async function promptAddPayment(ivDocNo) {
 
 /* ➡️RE ออกใบเสร็จ/ใบกำกับภาษีจากใบวางบิล (ต้องชำระครบ) */
 async function convertBillingToReceipt(ivDocNo) {
+    /* ตรวจก่อน: ยังไม่ชำระครบ → ส่งไปเมนูรับชำระเงินก่อน */
+    const iv = BOOT.documents.find(d => d.docNo === ivDocNo);
+    if (iv && iv.grandTotal > 0 && ((iv.paidTotal == null ? 0 : iv.paidTotal) < iv.grandTotal - 0.01)) {
+        const paid = Math.max(0, Number(iv.paidTotal) || 0);
+        const remain = iv.grandTotal - paid;
+        const r = await Swal.fire({
+            icon: 'warning',
+            title: 'ยังไม่ได้รับชำระเงิน',
+            html: `ใบวางบิล <b>${esc(ivDocNo)}</b> ยังมียอดคงค้าง<br>
+                   <span class="text-sm text-slate-600">ชำระแล้ว <b class="font-mono">฿${fmt(paid)}</b> / ทั้งหมด <b class="font-mono">฿${fmt(iv.grandTotal)}</b></span><br>
+                   <span class="text-rose-600 font-bold text-lg font-mono">คงค้าง ฿${fmt(remain)}</span><br><br>
+                   <span class="text-xs text-slate-500">กรุณาบันทึกการชำระเงินให้ครบก่อนจึงจะออกใบเสร็จ/ใบกำกับภาษีได้</span>`,
+            showCancelButton: true,
+            confirmButtonText: '💰 ไปรับชำระเงิน',
+            cancelButtonText: 'ปิด',
+            confirmButtonColor: '#059669'
+        });
+        if (r.isConfirmed) promptAddPayment(ivDocNo);
+        return;
+    }
+
     const result = await Swal.fire({
         icon: 'question',
         title: 'ออกใบเสร็จ/ใบกำกับภาษี?',
