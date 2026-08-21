@@ -787,11 +787,21 @@ function renderDocListTable() {
     }
 
     tbody.innerHTML = filtered.map(d => {
-        const statusBadge = d.status === 'Active'
+        /* สถานะการชำระเงิน: ชำระครบ → "ชำระแล้ว(วิธี)" + วันที่ชำระ */
+        const METHOD_TH = { CASH: 'เงินสด', TRANSFER: 'โอน', CHEQUE: 'เช็ค', OTHER: 'อื่นๆ' };
+        const baseBadge = d.status === 'Active'
             ? '<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800">Active</span>'
             : d.status === 'Billed'
             ? '<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-800">Billed</span>'
             : `<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-rose-100 text-rose-800" title="${esc(d.cancelReason)}">Cancelled</span>`;
+        let statusBadge = baseBadge;
+        if (d.status !== 'Cancelled' && d.paidInfo && d.paidInfo.total >= (Number(d.grandTotal) || 0) - 0.01) {
+            statusBadge = `<span class="inline-flex flex-col items-center gap-0.5 leading-tight">
+                <span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-800 whitespace-nowrap">✅ ชำระแล้ว(${esc(METHOD_TH[d.paidInfo.method] || d.paidInfo.method)})</span>
+                <span class="text-[10px] text-green-700 font-semibold">${fmtThaiFull(d.paidInfo.payDate)}</span></span>`;
+        } else if (d.status !== 'Cancelled' && d.paidInfo) {
+            statusBadge += `<span class="block mt-1"><span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-800 whitespace-nowrap">💰 ชำระบางส่วน ฿${fmt(d.paidInfo.total)}</span></span>`;
+        }
 
         const dateBadge = d.showDateOnPrint
             ? '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700">ลงวันที่</span>'
@@ -896,6 +906,7 @@ async function promptAddPayment(ivDocNo) {
             <div id="pay-detail-wrap" style="display:none">
                 <label>ข้อมูลที่เกี่ยวข้อง * (ธนาคาร/เลขบัญชี/เลขอ้างอิงโอน หรือ เลขที่เช็ค)<input id="pay-detail" type="text" placeholder="เช่น โอน ธ.กสิกรฯ ออมทรัพย์ x1234" style="${inputStyle}"></label>
             </div>
+            <label>หมายเหตุ (ถ้ามี)<textarea id="pay-note" rows="2" placeholder="ระบุข้อมูลเพิ่มเติม เช่น เช็ครับเป็นวันที่..., โอนเข้าบัญชีสาขา..." style="${inputStyle};resize:vertical"></textarea></label>
         </div>`,
         showCancelButton: true,
         confirmButtonText: '✅ บันทึกการชำระ',
@@ -905,7 +916,8 @@ async function promptAddPayment(ivDocNo) {
             payDate: document.getElementById('pay-date').value || todayISO(),
             amount: Number(document.getElementById('pay-amount').value),
             method: document.getElementById('pay-method').value,
-            detail: document.getElementById('pay-detail')?.value?.trim() || ''
+            detail: document.getElementById('pay-detail')?.value?.trim() || '',
+            note: document.getElementById('pay-note')?.value?.trim() || ''
         })
     });
     if (!result.isConfirmed) return;
@@ -917,7 +929,7 @@ async function promptAddPayment(ivDocNo) {
         return;
     }
     try {
-        const res = await gs('apiAddPayment', TOKEN, ivDocNo, v.payDate, v.amount, v.method, v.detail);
+        const res = await gs('apiAddPayment', TOKEN, ivDocNo, v.payDate, v.amount, v.method, v.detail, v.note);
         await loadBootstrapSilent();
         const full = res.paidTotal >= res.grandTotal - 0.01;
         Swal.fire({
@@ -1072,7 +1084,8 @@ function renderPrintPreview(doc) {
                     ${(doc.createdByName || doc.createdBy) ? `<p class="text-slate-600"><strong>จัดทำโดย:</strong> ${esc(doc.createdByName || doc.createdBy)}${(doc.updatedByName && doc.updatedByName !== (doc.createdByName || doc.createdBy)) ? ` &nbsp;|&nbsp; <strong>แก้ไขโดย:</strong> <span class="text-rose-700 font-semibold">${esc(doc.updatedByName)}</span>` : ''}</p>` : ''}
                 </div>
                 ${pi === 0 && doc.docType === 'QT' && doc.declaration ? `
-                <div class="a4-declaration text-[11px] leading-relaxed border border-t-0 border-slate-200 rounded-b-lg px-3 py-2 bg-white text-slate-800">${doc.declaration}</div>` : ''}` : ''}
+                <div class="a4-declaration text-[11px] leading-relaxed border border-t-0 border-slate-200 rounded-b-lg px-3 py-2 bg-white text-slate-800">
+                    <p class="font-bold text-xs text-slate-900 mb-1.5">คำชี้แจงการยื่นเสนอราคา</p>${doc.declaration}</div>` : ''}` : ''}
             </div>`;
 
         const rowsHtml = pageItems.map((it, ii) => `
@@ -1163,6 +1176,7 @@ function renderPrintPreview(doc) {
                             ${doc.payments.map(p => `
                             <div class="flex justify-between text-slate-700">
                                 <span>ชำระโดย: <strong>${esc(p.methodLabel || PAY_METHODS[p.method] || p.method)}</strong>${p.detail ? ' <span class="text-slate-500">(' + esc(p.detail) + ')</span>' : ''} <span class="text-slate-400 text-[10px]">${fmtDateTH(p.payDate)}</span></span>
+                                ${p.note ? `<span class="text-slate-500 text-[11px] italic">หมายเหตุ: ${esc(p.note)}</span>` : ''}
                                 <span class="font-mono">฿${fmt(p.amount)}</span>
                             </div>`).join('')}
                             ${(doc.paidTotal != null && doc.paidTotal < doc.grandTotal - 0.01) ? `
@@ -1284,10 +1298,11 @@ function previewSample(type) {
         docNo: type + '26-XXXX',
         docDate: todayISO(), showDateOnPrint: true,
         cusId: '__sample__', cusName: 'บริษัท ลูกค้าตัวอย่าง จำกัด',
-        subject: 'ตัวอย่างรายการสำหรับพรีวิวแบบพิมพ์ A4',
+        subject: type === 'QT' ? 'ยื่นเสนอราคา' : type === 'IV' ? 'ยื่นใบวางบิล/ใบส่งของ' : 'ตัวอย่างรายการสำหรับพรีวิวแบบพิมพ์ A4',
         sendDays: 30, confirmDays: 30, refDocNo: '',
         subTotal: sub, vatAmount: vat, grandTotal: sub + vat,
         status: 'Active', notes: 'นี่คือเอกสารตัวอย่าง (ข้อมูลสมมติทุกช่อง)',
+        declaration: defaultDeclarationText(),
         items
     };
     switchTab('print-preview');

@@ -115,6 +115,13 @@ function migrateSchema_() {
       dsh.setColumnWidth(22, 300);
     }
 
+    /* Payments col 9: 'หมายเหตุ' */
+    const psh = ss.getSheetByName('Payments');
+    if (psh && String(psh.getRange(1, Math.max(psh.getLastColumn(), 1)).getValue()) !== 'หมายเหตุ') {
+      psh.getRange(1, 9).setValue('หมายเหตุ');
+      psh.setColumnWidth(9, 180);
+    }
+
     /* ชีตใหม่: Categories / Units — สร้าง + seed อัตโนมัติสำหรับเดิมที่ยังไม่มี */
     [['Categories', 'CAT-', ['อุปกรณ์ไอที', 'เฟอร์นิเจอร์และของใช้สำนักงาน', 'วัสดุสิ้นเปลือง', 'งานติดตั้ง/บริการ']],
      ['Units', 'UNT-', ['ชิ้น', 'ชุด', 'อัน', 'กล่อง', 'แผ่น', 'ลัง', 'หน่วย', 'งาน']]
@@ -160,8 +167,8 @@ const DB_SCHEMA = [
     widths: [150,90,110,110,480] },
   { name: 'Sessions',      headers: ['Token','รหัสผู้ใช้','ชื่อผู้ใช้','ระดับ','สร้างเมื่อ','หมดอายุ'],
     widths: [360,90,120,90,150,150] },
-  { name: 'Payments',      headers: ['รหัสชำระเงิน','เลขที่เอกสาร','วันที่ชำระ','ยอดที่ชำระ','วิธีชำระเงิน','รายละเอียด (เลขเช็ค/โอน/อื่นๆ)','บันทึกโดย','บันทึกเมื่อ'],
-    widths: [110,110,110,120,110,240,90,150], moneyCols: ['D'] },
+  { name: 'Payments',      headers: ['รหัสชำระเงิน','เลขที่เอกสาร','วันที่ชำระ','ยอดที่ชำระ','วิธีชำระเงิน','รายละเอียด (เลขเช็ค/โอน/อื่นๆ)','บันทึกโดย','บันทึกเมื่อ','หมายเหตุ'],
+    widths: [110,110,110,120,110,240,90,150,180], moneyCols: ['D'] },
   { name: 'Categories',    headers: ['รหัสหมวด','ชื่อหมวดหมู่สินค้า','Active'],
     widths: [100,260,80] },
   { name: 'Units',         headers: ['รหัสหน่วย','ชื่อหน่วยนับ','Active'],
@@ -805,6 +812,22 @@ function listDocuments_() {
   const docs = rawDocuments_();
   docs.forEach(function(d) { d.items = itemsOf_(d.docNo); });
 
+  /* สรุปการชำระเงินต่อเอกสาร → แสดงสถานะ "ชำระแล้ว(วิธี)" + วันที่ชำระในรายการเอกสาร */
+  const paysAgg = {};
+  readAll_('Payments').forEach(function(r) {
+    const dn = String(r[1]);
+    if (!dn) return;
+    if (!paysAgg[dn]) paysAgg[dn] = { total: 0, method: '', payDate: '' };
+    const a = paysAgg[dn];
+    a.total += Number(r[3]) || 0;
+    const pd = normDateStr_(r[2]);
+    if (pd >= a.payDate) { a.payDate = pd; a.method = String(r[4]); }
+  });
+  docs.forEach(function(d) {
+    const a = paysAgg[d.docNo];
+    d.paidInfo = (a && a.total > 0) ? { total: a.total, method: a.method, payDate: a.payDate } : null;
+  });
+
   /* หา "จัดพิมพ์ล่าสุด" ต่อเอกสารจาก AuditLogs (Print / ExportPDF) */
   const prints = {};
   readAll_('AuditLogs').forEach(function(r) {
@@ -1051,7 +1074,7 @@ function apiSaveDocument(token, doc) {
           : method === 'CHEQUE' ? 'กรุณาระบุเลขที่เช็ค/ธนาคาร'
           : 'กรุณาระบุรายละเอียดวิธีชำระเงิน');
       }
-      payId = recordPayment_(s.userName, doc.docNo, doc.docDate, doc.grandTotal, method, detail);
+      payId = recordPayment_(s.userName, doc.docNo, doc.docDate, doc.grandTotal, method, detail, String(doc.payNote || ''));
     }
 
     logAudit_(s.userName, 'CreateDoc', doc.docNo,
@@ -1161,21 +1184,21 @@ function getPaymentsOf_(docNo) {
   return readAll_('Payments')
     .filter(function(r) { return String(r[1]) === String(docNo); })
     .map(function(r) {
-      return { payId: String(r[0]), docNo: String(r[1]), payDate: String(r[2]),
+      return { payId: String(r[0]), docNo: String(r[1]), payDate: normDateStr_(r[2]),
                amount: Number(r[3]) || 0, method: String(r[4]), methodLabel: PAY_METHODS[String(r[4])] || String(r[4]),
-               detail: String(r[5]), createdBy: String(r[6]), createdAt: String(r[7]) };
+               detail: String(r[5]), createdBy: String(r[6]), createdAt: String(r[7]), note: String(r[8] || '') };
     });
 }
 
-function recordPayment_(username, docNo, payDate, amount, method, detail) {
+function recordPayment_(username, docNo, payDate, amount, method, detail, note) {
   const payId = nextId_('Payments', 'PAY-', 4);
   sheet_('Payments').appendRow([payId, String(docNo), payDate || todayStr_(), Number(amount),
-                                method, String(detail || ''), username, nowStr_()]);
+                                method, String(detail || ''), username, nowStr_(), String(note || '')]);
   return payId;
 }
 
 /* บันทึกการรับชำระเงินของใบวางบิล (IV) — ต้องชำระครบก่อนออกใบเสร็จ RE */
-function apiAddPayment(token, docNo, payDate, amount, method, detail) {
+function apiAddPayment(token, docNo, payDate, amount, method, detail, note) {
   const s = requireAuth_(token);
   const sh = sheet_('Documents');
   const idx = findRowById_(sh, docNo);
@@ -1187,6 +1210,7 @@ function apiAddPayment(token, docNo, payDate, amount, method, detail) {
   if (!(amount > 0)) throw new Error('จำนวนเงินต้องมากกว่า 0');
   if (!PAY_METHODS[method]) throw new Error('กรุณาเลือกวิธีชำระเงิน');
   detail = String(detail || '').trim();
+  note = String(note || '').trim();
   /* เงินโอน/เช็ค/อื่นๆ → บังคับระบุข้อมูลที่เกี่ยวข้อง */
   if (method !== 'CASH' && !detail) {
     throw new Error(method === 'TRANSFER' ? 'กรุณาระบุข้อมูลการโอน (ธนาคาร/เลขบัญชี/เลขอ้างอิง)'
@@ -1198,9 +1222,10 @@ function apiAddPayment(token, docNo, payDate, amount, method, detail) {
   if (paidBefore + amount > grandTotal + 0.01) {
     throw new Error('ยอดเกินคงค้าง! ชำระแล้ว ' + paidBefore.toFixed(2) + ' / ทั้งหมด ' + grandTotal.toFixed(2) + ' → ชำระได้อีกไม่เกิน ' + Math.max(0, grandTotal - paidBefore).toFixed(2));
   }
-  const payId = recordPayment_(s.userName, docNo, payDate, amount, method, detail);
+  const payId = recordPayment_(s.userName, docNo, payDate, amount, method, detail, note);
   logAudit_(s.userName, 'AddPayment', docNo,
-    payId + ' | ' + PAY_METHODS[method] + (detail ? ' (' + detail + ')' : '') + ' | ' + amount.toFixed(2) + ' บาท');
+    payId + ' | ' + PAY_METHODS[method] + (detail ? ' (' + detail + ')' : '') + ' | ' + amount.toFixed(2) + ' บาท'
+    + (note ? ' | หมายเหตุ: ' + note : ''));
   return { ok: true, payId: payId, paidTotal: paidBefore + amount, grandTotal: grandTotal };
 }
 
@@ -1389,7 +1414,8 @@ function buildStandaloneHtml_(doc, items, st, payments) {
       body += head + custInfo;
       /* คำชี้แจงการยื่นเสนอราคา (QT) — ก่อนตารางรายการสินค้า */
       if (doc.docType === 'QT' && doc.declaration) {
-        body += '<div style="font-size:11px;line-height:1.55;border:1px solid ' + th.mid + ';border-radius:4px;padding:6px 10px;margin-bottom:8px;background:#ffffff">' + doc.declaration + '</div>';
+        body += '<div style="font-size:11px;line-height:1.55;border:1px solid ' + th.mid + ';border-radius:4px;padding:6px 10px;margin-bottom:8px;background:#ffffff">' +
+          '<div style="font-weight:bold;font-size:12px;margin-bottom:4px">คำชี้แจงการยื่นเสนอราคา</div>' + doc.declaration + '</div>';
       }
     }
     body += '<table style="width:100%;border-collapse:collapse;font-size:12px" border="1" cellpadding="4">' +
@@ -1410,7 +1436,7 @@ function buildStandaloneHtml_(doc, items, st, payments) {
         body += '<table style="width:100%;margin-top:8px;font-size:12px;background:' + th.soft + ';border:1px solid ' + th.mid + ';border-radius:6px;border-collapse:collapse" cellpadding="4">' +
           '<tr style="color:' + th.main + ';font-weight:bold"><td>การชำระเงิน</td><td style="text-align:center;width:95px">วันที่ชำระ</td><td style="text-align:right;width:105px">จำนวนเงิน (บาท)</td></tr>';
         payments.forEach(function(p) {
-          body += '<tr><td>ชำระโดย: <b>' + esc_(p.methodLabel) + '</b>' + (p.detail ? '<br><span style="font-size:10px">' + esc_(p.detail) + '</span>' : '') + '</td>' +
+          body += '<tr><td>ชำระโดย: <b>' + esc_(p.methodLabel) + '</b>' + (p.detail ? '<br><span style="font-size:10px">' + esc_(p.detail) + '</span>' : '') + (p.note ? '<br><span style="font-size:10px;font-style:italic">หมายเหตุ: ' + esc_(p.note) + '</span>' : '') + '</td>' +
             '<td style="text-align:center">' + esc_(p.payDate) + '</td>' +
             '<td style="text-align:right">' + thaiMoney_(p.amount) + '</td></tr>';
         });
