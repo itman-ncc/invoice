@@ -1238,6 +1238,7 @@ function getPaymentsOf_(docNo) {
     .filter(function(r) { return String(r[1]) === String(docNo); })
     .map(function(r) {
       return { payId: String(r[0]), docNo: String(r[1]), payDate: normDateStr_(r[2]),
+               payStamp: (r[2] instanceof Date) ? '' : String(r[2]),
                amount: Number(r[3]) || 0, method: String(r[4]), methodLabel: PAY_METHODS[String(r[4])] || String(r[4]),
                detail: String(r[5]), createdBy: String(r[6]), createdAt: String(r[7]), note: String(r[8] || '') };
     });
@@ -1245,7 +1246,13 @@ function getPaymentsOf_(docNo) {
 
 function recordPayment_(username, docNo, payDate, amount, method, detail, note) {
   const payId = nextId_('Payments', 'PAY-', 4);
-  sheet_('Payments').appendRow([payId, String(docNo), payDate || todayStr_(), Number(amount),
+  /* เก็บวันที่รับชำระเป็นรูปแบบ DD/MM/YYYY, HH:MM:SS (วันที่เลือก + เวลาที่บันทึกจริง) */
+  let dPart = String(payDate || '');
+  const dp = /^(\d{4})-(\d{2})-(\d{2})/.exec(normDateStr_(payDate));
+  if (dp) dPart = dp[3] + '/' + dp[2] + '/' + dp[1];
+  else { const t = todayStr_().split('-'); dPart = t[2] + '/' + t[1] + '/' + t[0]; }
+  const timePart = Utilities.formatDate(new Date(), TZ, 'HH:mm:ss');
+  sheet_('Payments').appendRow([payId, String(docNo), dPart + ', ' + timePart, Number(amount),
                                 method, String(detail || ''), username, nowStr_(), String(note || '')]);
   return payId;
 }
@@ -1389,7 +1396,14 @@ function normDateStr_(v) {
     const p = function(n) { return (n < 10 ? '0' : '') + n; };
     return v.getFullYear() + '-' + p(v.getMonth() + 1) + '-' + p(v.getDate());
   }
-  return String(v == null ? '' : v);
+  const s = String(v == null ? '' : v);
+  /* รองรับรูปแบบ DD/MM/YYYY[, HH:MM:SS] (ของช่องวันที่ชำระเงิน) → แปลงเป็น yyyy-MM-dd */
+  const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(s);
+  if (m) {
+    const p = function(n) { return (Number(n) < 10 ? '0' : '') + Number(n); };
+    return m[3] + '-' + p(m[2]) + '-' + p(m[1]);
+  }
+  return s;
 }
 
 const TH_MONTHS_ = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
@@ -1490,7 +1504,7 @@ function buildStandaloneHtml_(doc, items, st, payments) {
           '<tr style="color:' + th.main + ';font-weight:bold"><td>การชำระเงิน</td><td style="text-align:center;width:95px">วันที่ชำระ</td><td style="text-align:right;width:105px">จำนวนเงิน (บาท)</td></tr>';
         payments.forEach(function(p) {
           body += '<tr><td>ชำระโดย: <b>' + esc_(p.methodLabel) + '</b>' + (p.detail ? '<br><span style="font-size:10px">' + esc_(p.detail) + '</span>' : '') + (p.note ? '<br><span style="font-size:10px;font-style:italic">หมายเหตุ: ' + esc_(p.note) + '</span>' : '') + '</td>' +
-            '<td style="text-align:center">' + esc_(p.payDate) + '</td>' +
+            '<td style="text-align:center">' + esc_(p.payStamp || p.payDate) + '</td>' +
             '<td style="text-align:right">' + thaiMoney_(p.amount) + '</td></tr>';
         });
         body += '<tr><td colspan="2" style="text-align:right;font-weight:bold;color:' + th.main + '">ชำระแล้วทั้งหมด</td>' +
