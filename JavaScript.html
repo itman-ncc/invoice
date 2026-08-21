@@ -1061,6 +1061,17 @@ function renderDocListTable() {
         /* IV ที่ชำระครบแล้ว → ซ่อนปุ่ม 💰 (รับชำระ) */
         const ivPaidFull = d.docType === 'IV' && d.paidInfo && d.paidInfo.total >= (Number(d.grandTotal) || 0) - 0.01;
 
+        /* เมนู "จัดการ" — แสดงเฉพาะรายการที่ใช้ได้ตามประเภท/สถานะเอกสาร */
+        const actOpts = [`<option value="print">🖨️ Preview/Print ${TYPE_LABELS[d.docType] || d.docType}</option>`];
+        if (d.status === 'Active') actOpts.push('<option value="edit">✏️ แก้ไขเอกสาร</option>');
+        if (d.docType === 'QT' && d.status === 'Active') actOpts.push('<option value="toiv">➡️ สร้างใบวางบิล (IV)</option>');
+        if (d.docType === 'IV' && d.status === 'Active') {
+            if (!ivPaidFull) actOpts.push('<option value="pay">💰 บันทึกรับชำระเงิน</option>');
+            actOpts.push('<option value="tore">🧾 ออกใบเสร็จ/ใบกำกับภาษี (RE)</option>');
+        }
+        if (d.status !== 'Cancelled') actOpts.push('<option value="cancel">✕ ยกเลิก (ระบุเหตุผล)</option>');
+        actOpts.push('<option value="pdf">📄 Export PDF</option>');
+
         return `
         <tr class="hover:bg-slate-50">
             <td class="p-3 font-mono font-bold text-slate-800 text-xs">${esc(d.docNo)}</td>
@@ -1070,17 +1081,28 @@ function renderDocListTable() {
             <td class="p-3 text-xs font-medium">${esc(d.cusName)}</td>
             <td class="p-3 text-right font-mono font-bold text-xs">฿${fmt(d.grandTotal)}</td>
             <td class="p-3 text-center">${statusBadge}</td>
-            <td class="p-3 text-center whitespace-nowrap space-x-1">
-                <button onclick="viewDocPreview('${esc(d.docNo)}')" class="text-xs font-bold text-slate-600 hover:text-emerald-600" title="พรีวิว/พิมพ์">🖨️</button>
-                ${d.status === 'Active' ? `<button onclick="editDocument('${esc(d.docNo)}')" class="text-xs font-bold text-blue-600 hover:underline" title="แก้ไข">✏️</button>` : ''}
-                ${d.docType === 'QT' && d.status === 'Active' ? `<button onclick="convertQtToBilling('${esc(d.docNo)}')" class="text-xs font-bold text-indigo-600 hover:underline" title="สร้างใบวางบิล">➡️IV</button>` : ''}
-                ${d.docType === 'IV' && d.status === 'Active' && !ivPaidFull ? `<button onclick="promptAddPayment('${esc(d.docNo)}')" class="text-xs font-bold text-emerald-600 hover:underline" title="บันทึกรับชำระเงิน">💰</button>` : ''}
-                ${d.docType === 'IV' && d.status === 'Active' ? `<button onclick="convertBillingToReceipt('${esc(d.docNo)}')" class="text-xs font-bold text-purple-600 hover:underline" title="ออกใบเสร็จ (ต้องชำระครบก่อน)">➡️RE</button>` : ''}
-                ${d.status !== 'Cancelled' ? `<button onclick="cancelDocumentPrompt('${esc(d.docNo)}')" class="text-xs font-bold text-rose-500 hover:text-rose-700" title="ยกเลิก">✕</button>` : ''}
-                <button onclick="exportSinglePdf('${esc(d.docNo)}')" class="text-xs font-bold text-purple-600 hover:underline" title="Export PDF">📄</button>
+            <td class="p-3 text-center">
+                <select onchange="docAction(this, '${esc(d.docNo)}')"
+                        class="text-xs border border-slate-300 rounded-md px-2 py-1.5 bg-white text-slate-700 hover:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer">
+                    <option value="">⚙️ จัดการ…</option>${actOpts.join('')}
+                </select>
             </td>
         </tr>`;
     }).join('');
+}
+
+/* เมนู "จัดการ" ในรายการเอกสาร → เรียกฟังก์ชันตามที่เลือก แล้วรีเซ็ตกลับหัวข้อ */
+function docAction(sel, docNo) {
+    const act = sel.value;
+    sel.value = '';
+    if (!act) return;
+    if (act === 'print') viewDocPreview(docNo);
+    else if (act === 'edit') editDocument(docNo);
+    else if (act === 'toiv') convertQtToBilling(docNo);
+    else if (act === 'pay') promptAddPayment(docNo);
+    else if (act === 'tore') convertBillingToReceipt(docNo);
+    else if (act === 'cancel') cancelDocumentPrompt(docNo);
+    else if (act === 'pdf') exportSinglePdf(docNo);
 }
 
 async function viewDocPreview(docNo) {
