@@ -42,10 +42,13 @@ function esc(v) {
 }
 function fmt(n) { return Number(n || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 function fmtShort(n) { return Number(n || 0).toLocaleString('th-TH'); }
-function fmtDateTH(iso) {
+function fmtDateTH(iso, withTime) {
     if (!iso) return '-';
-    const p = String(iso).split('-');
-    return p.length === 3 ? `${p[2]}/${p[1]}/${p[0]}` : iso;
+    const m = String(iso).trim().match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}))?/);
+    if (!m) return iso;
+    const be = Number(m[1]) + 543;
+    const base = `${m[3]}/${m[2]}/${be}`;
+    return withTime && m[4] ? `${base} ${m[4]}:${m[5]}` : base;
 }
 function todayISO() {
     const d = new Date();
@@ -245,7 +248,7 @@ async function renderDashboard() {
         options: {
             responsive: true, maintainAspectRatio: false,
             plugins: { legend: { display: false },
-                title: { display: true, text: 'ปี ' + year } },
+                title: { display: true, text: 'ปี พ.ศ. ' + (year + 543) } },
             scales: { y: { ticks: { callback: v => '฿' + Number(v).toLocaleString() } } }
         }
     });
@@ -1194,7 +1197,7 @@ function renderAuditLogs() {
         ? '<tr><td colspan="5" class="p-3 text-center text-slate-400">ยังไม่มีบันทึก</td></tr>'
         : BOOT.logs.map(l => `
         <tr class="hover:bg-slate-50">
-            <td class="p-2.5 text-slate-500 whitespace-nowrap">${esc(l.timestamp)}</td>
+            <td class="p-2.5 text-slate-500 whitespace-nowrap">${esc(fmtDateTH(l.timestamp, true))}</td>
             <td class="p-2.5 font-bold text-slate-700">${esc(l.user)}</td>
             <td class="p-2.5">
                 <span class="px-1.5 py-0.5 rounded text-[10px] font-bold ${
