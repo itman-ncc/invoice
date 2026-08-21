@@ -162,7 +162,7 @@ function enterApp() {
 
     initCreateDocForm();
     renderAll();
-    switchTab(admin ? 'dashboard' : 'dashboard');
+    switchTab('dashboard');
 }
 
 function forceLogout(msg) {
@@ -1545,13 +1545,15 @@ async function exportSinglePdf(docNo) {
 /* ============================================================
  * MASTER DATA — PRODUCTS
  * ============================================================ */
-let productPage = 1;
+let productPage = 1, productLastQ = null;
 const PRODUCT_PAGE_SIZE = 10;
 
 function renderProductsTable() {
     const pTbody = document.getElementById('master-products-tbody');
-    if (!pTbody) return;
+    if (!pTbody || !BOOT) return;
     const q = (document.getElementById('product-search')?.value || '').toLowerCase().trim();
+    /* คำค้นเปลี่ยน → กลับไปหน้า 1 เสมอ */
+    if (q !== productLastQ) { productPage = 1; productLastQ = q; }
     const list = BOOT.products.filter(p =>
         !q || (p.id || '').toLowerCase().includes(q) || (p.name || '').toLowerCase().includes(q) ||
         (p.category || '').toLowerCase().includes(q));
