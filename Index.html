@@ -70,7 +70,8 @@
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex items-center justify-between h-16">
                 <div class="flex items-center space-x-3">
-                    <span class="text-2xl">🧾</span>
+                    <img id="nav-logo" src="" alt="โลโก้ร้าน" class="hidden h-10 w-auto max-w-[130px] object-contain bg-white rounded-lg px-1.5 py-0.5 shadow-sm">
+                    <span class="text-2xl" id="nav-logo-fallback">🧾</span>
                     <div>
                         <h1 class="font-bold text-lg leading-tight">Smart Billing System</h1>
                         <p class="text-xs text-slate-300">ระบบเอกสารการขาย &amp; รายงานสถิติ</p>
@@ -492,8 +493,14 @@
                 <div class="bg-white p-5 rounded-xl shadow-sm border border-stone-200 space-y-4">
                     <h3 class="font-bold text-slate-800 text-base pb-2 border-b border-slate-200">🏢 ข้อมูลร้านค้า</h3>
                     <div>
-                        <label class="block text-xs font-semibold text-slate-600 mb-1">URL โลโก้</label>
-                        <input type="text" id="setting-logo-url" class="w-full p-2 border border-slate-300 rounded text-sm">
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">URL โลโก้ (ลิงก์รูปภาพ)</label>
+                        <input type="text" id="setting-logo-url" placeholder="https://... .png/.jpg" oninput="previewLogoSetting()"
+                            class="w-full p-2 border border-slate-300 rounded text-sm">
+                        <div id="logo-preview-wrap" class="hidden mt-2 flex items-center gap-3 bg-slate-50 border border-slate-200 rounded-lg p-2">
+                            <img id="logo-preview" src="" alt="ตัวอย่างโลโก้" class="h-14 w-auto max-w-[150px] object-contain bg-white rounded border border-slate-200 p-1">
+                            <span class="text-[11px] text-emerald-700 font-semibold leading-snug">✓ พรีวิวโลโก้<br>จะแสดงบนเว็บ + เอกสาร</span>
+                        </div>
+                        <p class="text-[11px] text-slate-400 mt-1">แนะนำ PNG พื้นหลังโปร่งใส — อัปโหลดลง Google Drive (เปิดลิงก์สาธารณะ) หรือใช้ URL จากเว็บ แล้ววางลิงก์ที่นี่</p>
                     </div>
                     <div>
                         <label class="block text-xs font-semibold text-slate-600 mb-1">ชื่อร้าน / บริษัท</label>

@@ -1147,6 +1147,24 @@ function esc_(v) {
 
 function thaiMoney_(n) { return Number(n || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 
+/* วัน.เดือน.ปี(พ.ศ.) เวลา — สำหรับตราท้ายเอกสารฝั่ง PDF */
+function fmtDotTH_(d) {
+  const p = function(n) { return (n < 10 ? '0' : '') + n; };
+  return p(d.getDate()) + '.' + p(d.getMonth() + 1) + '.' + (d.getFullYear() + 543) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+}
+
+function getLastPrint_(docNo) {
+  let best = null;
+  readAll_('AuditLogs').forEach(function(r) {
+    const act = String(r[2]);
+    if (act !== 'Print' && act !== 'ExportPDF') return;
+    if (String(r[3]) !== String(docNo)) return;
+    const at = r[0] instanceof Date ? fmtDateTime_(r[0]) : String(r[0]);
+    if (!best || at > best.at) best = { by: String(r[1]), at: at };
+  });
+  return best;
+}
+
 function buildStandaloneHtml_(doc, items, st) {
   const pages = [];
   for (let i = 0; i < items.length; i += ITEMS_PER_PAGE) pages.push(items.slice(i, i + ITEMS_PER_PAGE));
@@ -1154,11 +1172,23 @@ function buildStandaloneHtml_(doc, items, st) {
   const totalPages = pages.length;
   const dateText = doc.showDateOnPrint ? esc_(doc.docDate) : '____________________';
 
+  /* ตรามุมล่างขวา: วัน.เดือน.ปี(พ.ศ.).เวลา | ผู้บันทึก(login)/แก้ไข/จัดพิมพ์ล่าสุด */
+  const creatorNameS = doc.createdByName || doc.createdBy || '';
+  const stampParts = [];
+  if (creatorNameS) stampParts.push('บันทึก: ' + creatorNameS + (doc.createdBy ? ' (' + doc.createdBy + ')' : ''));
+  if (doc.updatedByName && doc.updatedByName !== creatorNameS) stampParts.push('แก้ไข: ' + doc.updatedByName);
+  const lp = getLastPrint_(doc.docNo);
+  if (lp) stampParts.push('จัดพิมพ์ล่าสุด: ' + lp.by + ' ' + fmtDotTH_(new Date(String(lp.at).replace(' ', 'T'))));
+  else stampParts.push('จัดพิมพ์ล่าสุด: -');
+  const printStamp = fmtDotTH_(new Date()) + ' | ' + stampParts.join(' / ');
+
   const head =
     '<div style="display:flex;justify-content:space-between;border-bottom:2px solid #333;padding-bottom:8px;margin-bottom:8px">' +
+    '<div style="display:flex;align-items:flex-start;gap:10px">' +
+    (st.logoUrl ? '<img src="' + esc_(st.logoUrl) + '" style="height:56px;max-width:110px;object-fit:contain" onerror="this.style.display=\'none\'">' : '') +
     '<div><div style="font-size:18px;font-weight:bold">' + esc_(st.shopName) + '</div>' +
     '<div style="font-size:11px">ที่อยู่: ' + esc_(st.shopAddress) + '</div>' +
-    '<div style="font-size:11px">โทร: ' + esc_(st.shopPhone) + ' | เลขประจำตัวผู้เสียภาษี: ' + esc_(st.shopTaxId) + '</div></div>' +
+    '<div style="font-size:11px">โทร: ' + esc_(st.shopPhone) + ' | เลขประจำตัวผู้เสียภาษี: ' + esc_(st.shopTaxId) + '</div></div></div>' +
     '<div style="text-align:right"><div style="font-size:16px;font-weight:bold">' + esc_(typeLabel_(doc.docType)) + '</div>' +
     '<div style="font-size:12px;font-weight:bold">' + esc_(doc.docNo) + '</div>' +
     '<div style="font-size:11px">วันที่: ' + dateText + '</div>' +
@@ -1209,7 +1239,9 @@ function buildStandaloneHtml_(doc, items, st) {
         '<td style="text-align:center;width:33%">ในนาม ' + esc_(st.shopName) + '<br><br><br>_____________________<br><b>(' + esc_(st.signatoryName || st.managerName) + ')</b><br>ผู้จัดการ / ผู้มีอำนาจลงนาม</td>' +
         '</tr></table>';
     }
-    body += '</div></div>';
+    body += '</div>';
+    body += '<div style="margin-top:8px;padding-top:4px;border-top:1px solid #ddd;font-size:9px;color:#888;text-align:right">' + esc_(printStamp) + '</div>';
+    body += '</div>';
   });
 
   return '<!DOCTYPE html><html><head><meta charset="UTF-8"></head>' +
