@@ -77,7 +77,7 @@ async function loadBootstrap() {
 function enterApp() {
     document.getElementById('login-modal').classList.add('hidden');
     document.getElementById('app-header').classList.remove('hidden');
-    document.getElementById('logged-user-name').innerText = USER.name;
+    document.getElementById('logged-user-name').innerText = USER.fullName || USER.name;
     document.getElementById('logged-user-role').innerText = '(' + USER.role + ')';
 
     if (String(USER.role).toLowerCase() !== 'admin') {
@@ -149,7 +149,7 @@ async function handleLoginSubmit(event) {
         sessionStorage.setItem('sb_user', JSON.stringify(USER));
         await loadBootstrap();
         enterApp();
-        Toast.fire({ icon:'success', title:'เข้าสู่ระบบสำเร็จ — ยินดีต้อนรับ ' + USER.name });
+        Toast.fire({ icon:'success', title:'เข้าสู่ระบบสำเร็จ — ยินดีต้อนรับ ' + (USER.fullName || USER.name) });
     } catch (e) {
         Swal.fire('เข้าสู่ระบบไม่สำเร็จ', e.message, 'error');
         generateCaptcha();
@@ -886,6 +886,7 @@ function renderPrintPreview(doc) {
                     </div>
                     <p><strong>ที่อยู่:</strong> ${esc(cus.address)} | <strong>โทร:</strong> ${esc(cus.phone)}</p>
                     ${doc.docType === 'QT' ? `<p><strong>เรื่อง:</strong> ${esc(doc.subject || 'ใบเสนอราคาพิจารณาจัดซื้อจัดจ้าง')}</p>` : ''}
+                    ${(doc.createdByName || doc.createdBy) ? `<p class="text-slate-600"><strong>จัดทำโดย:</strong> ${esc(doc.createdByName || doc.createdBy)}${(doc.updatedByName && doc.updatedByName !== (doc.createdByName || doc.createdBy)) ? ` &nbsp;|&nbsp; <strong>แก้ไขโดย:</strong> <span class="text-rose-700 font-semibold">${esc(doc.updatedByName)}</span>` : ''}</p>` : ''}
                 </div>` : ''}
             </div>`;
 
@@ -1124,6 +1125,7 @@ function renderMasterDB() {
         <tr class="hover:bg-slate-50">
             <td class="p-3 font-mono font-bold text-slate-700 text-xs">${esc(u.id)}</td>
             <td class="p-3 font-semibold text-slate-800">${esc(u.username)}</td>
+            <td class="p-3 text-xs text-slate-700">${esc(u.fullName || '-')}</td>
             <td class="p-3 text-xs">${u.role === 'Admin' ? '<span class="px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 font-semibold">Admin</span>' : '<span class="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">Staff</span>'}</td>
             <td class="p-3 text-center">${u.active ? '✅' : '⛔'}</td>
             <td class="p-3 text-center whitespace-nowrap">
@@ -1258,6 +1260,8 @@ function openUserModal(opts) {
         width: 440,
         html: `
             <div class="text-left text-sm space-y-1">
+                <label class="text-xs font-semibold text-slate-600">ชื่อ-สกุล (แสดงบนเอกสาร) *</label>
+                <input id="m-user-fullname" value="${esc(u ? u.fullName : '')}" placeholder="เช่น สมชาย ใจดี" class="${swalInputCls}">
                 <label class="text-xs font-semibold text-slate-600">ชื่อผู้ใช้ (Username) *</label>
                 <input id="m-user-name" value="${esc(u ? u.username : '')}" class="${swalInputCls}">
                 <label class="text-xs font-semibold text-slate-600">รหัสผ่าน ${u ? '(เว้นว่าง = คงเดิม)' : '*'}</label>
@@ -1279,6 +1283,7 @@ function openUserModal(opts) {
         focusConfirm: false,
         preConfirm: () => ({
             id: u ? u.id : '',
+            fullName: document.getElementById('m-user-fullname').value.trim(),
             username: document.getElementById('m-user-name').value.trim(),
             password: document.getElementById('m-user-pass').value,
             role: document.getElementById('m-user-role').value,
@@ -1287,7 +1292,8 @@ function openUserModal(opts) {
     }).then(async (result) => {
         if (!result.isConfirmed) return;
         const data = result.value;
-        if (!data.username || (!u && !data.password)) { Swal.fire('ข้อมูลไม่ครบ', 'กรุณากรอกชื่อผู้ใช้' + (u ? '' : 'และรหัสผ่าน'), 'error'); return; }
+        if (!data.username || (!u && !data.password)) { Swal.fire('ข้อมูลไม่ครบ', 'กรุณากรอกชื่อ-สกุล' + (u ? '' : ' ชื่อผู้ใช้ และรหัสผ่าน'), 'error'); return; }
+        if (!data.fullName) { Swal.fire('ข้อมูลไม่ครบ', 'กรุณาระบุชื่อ-สกุล (ใช้แสดงบนเอกสาร)', 'error'); return; }
         try {
             await gs('apiSaveUser', TOKEN, data);
             await loadBootstrapSilent();

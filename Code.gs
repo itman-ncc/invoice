@@ -34,6 +34,7 @@ function ensureSetup_() {
       setupSystem();
     }
     migrateSettings_();
+    migrateSchema_();
     autoImportSamples_();
   } catch (e) {
     // ถ้ายัง authorize ไม่ได้ ให้ผู้ใช้รัน setupSystem() จาก Editor เอง
@@ -63,6 +64,48 @@ function migrateSettings_() {
   } catch (e) {}
 }
 
+/* เพิ่มคอลัมน์ใหม่ให้ชีตเดิมโดยไม่ลบข้อมูล:
+ * Users → 'ชื่อ-สกุล' | Documents → 'จัดทำโดย (ชื่อ-สกุล)' + 'แก้ไขโดย (ชื่อ-สกุล)' */
+function migrateSchema_() {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const ush = ss.getSheetByName('Users');
+    if (ush && String(ush.getRange(1, Math.max(ush.getLastColumn(), 1)).getValue()) !== 'ชื่อ-สกุล') {
+      ush.getRange(1, 6).setValue('ชื่อ-สกุล');
+      ush.setColumnWidth(6, 200);
+      const last = ush.getLastRow();
+      if (last > 1) {
+        const rows = ush.getRange(2, 1, last - 1, 2).getValues();
+        /* เติมค่าเริ่มต้น = ชื่อผู้ใช้ (ให้ Admin แก้เป็นชื่อจริงภายหลังได้) */
+        ush.getRange(2, 6, last - 1, 1).setValues(rows.map(function(r) { return [String(r[1])]; }));
+      }
+    }
+
+    const dsh = ss.getSheetByName('Documents');
+    if (dsh && String(dsh.getRange(1, Math.max(dsh.getLastColumn(), 1)).getValue()) !== 'แก้ไขโดย (ชื่อ-สกุล)') {
+      dsh.getRange(1, 20).setValue('จัดทำโดย (ชื่อ-สกุล)');
+      dsh.getRange(1, 21).setValue('แก้ไขโดย (ชื่อ-สกุล)');
+      dsh.setColumnWidth(20, 150);
+      dsh.setColumnWidth(21, 150);
+      /* backfill: เติมชื่อ-สกุลผู้จัดทำย้อนหลังจากชีต Users */
+      const nameMap = {};
+      if (ush && ush.getLastRow() > 1) {
+        ush.getRange(2, 1, ush.getLastRow() - 1, 6).getValues().forEach(function(r) {
+          const fn = String(r[5] || '').trim() || String(r[1]);
+          nameMap[String(r[0])] = fn;
+          nameMap[String(r[1])] = fn;
+        });
+      }
+      const last = dsh.getLastRow();
+      if (last > 1) {
+        const creators = dsh.getRange(2, 17, last - 1, 1).getValues();
+        dsh.getRange(2, 20, last - 1, 2).setValues(
+          creators.map(function(r) { const n = nameMap[String(r[0])] || String(r[0] || ''); return [n, n]; }));
+      }
+    }
+  } catch (e) {}
+}
+
 function include(filename) {
   return HtmlService.createHtmlOutputFromFile(filename).getContent();
 }
@@ -71,15 +114,15 @@ function include(filename) {
  * SECTION 2: DATABASE SETUP (รันครั้งเดียว)
  * ============================================================ */
 const DB_SCHEMA = [
-  { name: 'Users',         headers: ['รหัสผู้ใช้','ชื่อผู้ใช้','รหัสผ่าน (SHA-256)','ระดับการใช้งาน','Active'],
-    widths: [90,160,340,130,80] },
+  { name: 'Users',         headers: ['รหัสผู้ใช้','ชื่อผู้ใช้','รหัสผ่าน (SHA-256)','ระดับการใช้งาน','Active','ชื่อ-สกุล'],
+    widths: [90,160,340,130,80,200] },
   { name: 'Customers',     headers: ['รหัสลูกค้า','ชื่อลูกค้า','ที่อยู่','เบอร์โทรศัพท์','อีเมล','เลขที่ภาษีลูกค้า'],
     widths: [90,220,300,110,180,140] },
   { name: 'Products',      headers: ['รหัสสินค้า','ชื่อสินค้า','หมวดหมู่สินค้า','หน่วยนับ','ราคาต่อหน่วย','จำนวนในสต๊อก','จำนวนคงคลัง','จุดสั่งซื้อ','สถานะสินค้า'],
     widths: [90,260,120,90,110,110,110,100,110], moneyCols: ['E'] },
   { name: 'Settings',      headers: ['Key','Value'], widths: [160,420] },
-  { name: 'Documents',     headers: ['เลขที่เอกสาร','ประเภท','วันที่เอกสาร','แสดงวันที่บนเอกสาร','รหัสลูกค้า','ชื่อลูกค้า','เรื่อง','กำหนดส่งมอบ (วัน)','กำหนดยืนราคา (วัน)','อ้างอิงเอกสาร','ยอดรวมก่อนภาษี','ภาษีมูลค่าเพิ่ม','ยอดรวมทั้งสิ้น','สถานะ','เหตุผลการยกเลิก','หมายเหตุ','สร้างโดย','สร้างเมื่อ','แก้ไขล่าสุด'],
-    widths: [110,70,100,130,90,190,240,110,110,110,120,110,120,90,180,180,90,140,140], moneyCols: ['K','L','M'] },
+  { name: 'Documents',     headers: ['เลขที่เอกสาร','ประเภท','วันที่เอกสาร','แสดงวันที่บนเอกสาร','รหัสลูกค้า','ชื่อลูกค้า','เรื่อง','กำหนดส่งมอบ (วัน)','กำหนดยืนราคา (วัน)','อ้างอิงเอกสาร','ยอดรวมก่อนภาษี','ภาษีมูลค่าเพิ่ม','ยอดรวมทั้งสิ้น','สถานะ','เหตุผลการยกเลิก','หมายเหตุ','สร้างโดย','สร้างเมื่อ','แก้ไขล่าสุด','จัดทำโดย (ชื่อ-สกุล)','แก้ไขโดย (ชื่อ-สกุล)'],
+    widths: [110,70,100,130,90,190,240,110,110,110,120,110,120,90,180,180,90,140,140,150,150], moneyCols: ['K','L','M'] },
   { name: 'DocumentItems', headers: ['เลขที่เอกสาร','ลำดับ','รหัสสินค้า','ชื่อสินค้า','หน่วยนับ','จำนวน','ราคาต่อหน่วย','ราคารวม'],
     widths: [110,60,90,260,90,80,110,110], moneyCols: ['G','H'] },
   { name: 'Counters',      headers: ['Key (ประเภท-ปี)','เลขล่าสุด'], widths: [140,110] },
@@ -137,9 +180,9 @@ function setupSystem() {
 function seedUsers_(ss, log) {
   const sh = ss.getSheetByName('Users');
   if (sh.getLastRow() > 1) return;
-  sh.getRange(2, 1, 2, 5).setValues([
-    ['U-001', 'admin', sha256_('1234'), 'Admin', true],
-    ['U-002', 'staff', sha256_('1234'), 'Staff', true]
+  sh.getRange(2, 1, 2, 6).setValues([
+    ['U-001', 'admin', sha256_('1234'), 'Admin', true, 'ผู้ดูแลระบบ'],
+    ['U-002', 'staff', sha256_('1234'), 'Staff', true, 'พนักงาน']
   ]);
   log.push('🌱 Users: admin/1234 (Admin), staff/1234 (Staff)');
 }
@@ -499,7 +542,7 @@ function apiLogin(username, password) {
       const expiry = new Date(now.getTime() + SESSION_HOURS * 3600 * 1000);
       sheet_('Sessions').appendRow([token, r[0], r[1], r[3], now, expiry]);
       logAudit_(r[1], 'Login', '-', 'เข้าสู่ระบบสำเร็จ');
-      return { ok: true, token: token, user: { id: r[0], name: r[1], role: r[3] } };
+      return { ok: true, token: token, user: { id: r[0], name: r[1], role: r[3], fullName: String(r[5] || '').trim() || r[1] } };
     }
   }
   return { ok: false, message: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง' };
@@ -513,10 +556,18 @@ function requireAuth_(token) {
     if (String(rows[i][0]) === String(token)) {
       const expiry = rows[i][5] instanceof Date ? rows[i][5] : new Date(rows[i][5]);
       if (expiry < now) { deleteSessionRow_(i + 2); throw new Error('SESSION_EXPIRED'); }
-      return { token: token, userId: rows[i][1], userName: rows[i][2], role: rows[i][3] };
+      return { token: token, userId: rows[i][1], userName: rows[i][2], role: rows[i][3],
+               fullName: getUserFullName_(rows[i][1]) || rows[i][2] };
     }
   }
   throw new Error('SESSION_EXPIRED');
+}
+
+/* ค้นชื่อ-สกุลจากรหัสผู้ใช้ (หรือชื่อผู้ใช้) — ไม่เจอคืนค่าว่าง */
+function getUserFullName_(userIdOrName) {
+  const key = String(userIdOrName || '');
+  const hit = readAll_('Users').filter(function(r) { return String(r[0]) === key || String(r[1]) === key; })[0];
+  return hit ? (String(hit[5] || '').trim() || String(hit[1])) : '';
 }
 
 function requireAdmin_(session) {
@@ -588,7 +639,8 @@ function listProducts_() {
 function listUsersSanitized_() {
   return readAll_('Users').map(function(r) {
     return { id: String(r[0]), username: String(r[1]), role: String(r[3]),
-             active: r[4] === true || String(r[4]).toUpperCase() === 'TRUE' };
+             active: r[4] === true || String(r[4]).toUpperCase() === 'TRUE',
+             fullName: String(r[5] || '') };
   });
 }
 
@@ -603,7 +655,8 @@ function rawDocuments_() {
       vatAmount: Number(r[11]) || 0, grandTotal: Number(r[12]) || 0,
       status: String(r[13] || 'Active'), cancelReason: String(r[14] || ''),
       notes: String(r[15] || ''), createdBy: String(r[16] || ''),
-      createdAt: String(r[17] || ''), updatedAt: String(r[18] || '')
+      createdAt: String(r[17] || ''), updatedAt: String(r[18] || ''),
+      createdByName: String(r[19] || ''), updatedByName: String(r[20] || '')
     };
   });
 }
@@ -707,15 +760,15 @@ function apiSaveUser(token, u) {
   if (!u.id) {
     if (!u.password) throw new Error('กรุณาระบุรหัสผ่านสำหรับผู้ใช้ใหม่');
     const id = nextId_('Users', 'U-', 3);
-    sh.appendRow([id, String(u.username), sha256_(String(u.password)), u.role || 'Staff', u.active !== false]);
-    logAudit_(s.userName, 'AddUser', id, 'เพิ่มผู้ใช้: ' + u.username + ' (' + (u.role || 'Staff') + ')');
+    sh.appendRow([id, String(u.username), sha256_(String(u.password)), u.role || 'Staff', u.active !== false, String(u.fullName || '').trim()]);
+    logAudit_(s.userName, 'AddUser', id, 'เพิ่มผู้ใช้: ' + u.username + ' (' + (u.role || 'Staff') + ')' + (u.fullName ? ' ชื่อ-สกุล: ' + u.fullName : ''));
     return { ok: true };
   }
   const idx = findRowById_(sh, u.id);
   if (idx < 0) throw new Error('ไม่พบผู้ใช้รหัส ' + u.id);
   const existingHash = sh.getRange(idx, 3).getValue();
   const newHash = u.password ? sha256_(String(u.password)) : existingHash;
-  sh.getRange(idx, 1, 1, 5).setValues([[u.id, String(u.username), newHash, u.role || 'Staff', u.active !== false]]);
+  sh.getRange(idx, 1, 1, 6).setValues([[u.id, String(u.username), newHash, u.role || 'Staff', u.active !== false, String(u.fullName || '').trim()]]);
   logAudit_(s.userName, 'EditUser', u.id, 'แก้ไขผู้ใช้: ' + u.username);
   return { ok: true };
 }
@@ -786,7 +839,8 @@ function docRowOf_(doc) {
           Number(doc.sendDays) || 30, Number(doc.confirmDays) || 30, doc.refDocNo || '',
           Number(doc.subTotal) || 0, Number(doc.vatAmount) || 0, Number(doc.grandTotal) || 0,
           doc.status || 'Active', doc.cancelReason || '', doc.notes || '',
-          doc.createdBy || '', doc.createdAt || nowStr_(), nowStr_()];
+          doc.createdBy || '', doc.createdAt || nowStr_(), nowStr_(),
+          doc.createdByName || '', doc.updatedByName || ''];
 }
 
 function appendItems_(docNo, items) {
@@ -827,6 +881,8 @@ function apiSaveDocument(token, doc) {
     doc.status = 'Active';
     doc.createdBy = s.userName;
     doc.createdAt = nowStr_();
+    doc.createdByName = s.fullName || s.userName;
+    doc.updatedByName = doc.createdByName;
     sh.appendRow(docRowOf_(doc));
     appendItems_(doc.docNo, doc.items);
 
@@ -856,7 +912,9 @@ function apiSaveDocument(token, doc) {
   doc.status = existing.status;
   doc.createdBy = existing.createdBy;
   doc.createdAt = existing.createdAt;
-  sh.getRange(idx, 1, 1, 19).setValues([docRowOf_(doc)]);
+  doc.createdByName = existing.createdByName || getUserFullName_(existing.createdBy) || existing.createdBy;
+  doc.updatedByName = s.fullName || s.userName;
+  sh.getRange(idx, 1, 1, 21).setValues([docRowOf_(doc)]);
   deleteItemsOf_(doc.docNo);
   appendItems_(doc.docNo, doc.items);
   logAudit_(s.userName, 'EditDoc', doc.docNo, 'แก้ไขเอกสาร ' + doc.docNo);
@@ -903,7 +961,8 @@ function apiConvertQtToBilling(token, qtDocNo) {
     subject: qt.subject, sendDays: qt.sendDays, confirmDays: qt.confirmDays,
     refDocNo: qt.docNo,
     subTotal: qt.subTotal, vatAmount: qt.vatAmount, grandTotal: qt.grandTotal,
-    notes: qt.notes, createdBy: s.userName, createdAt: nowStr_()
+    notes: qt.notes, createdBy: s.userName, createdAt: nowStr_(),
+    createdByName: s.fullName || s.userName, updatedByName: s.fullName || s.userName
   };
   validateDoc_({ docType: 'IV', cusId: inv.cusId, items: [{ prodName: 'temp' }] });
   inv.docNo = generateDocNo_('IV');
@@ -1016,7 +1075,8 @@ function apiConvertBillingToReceipt(token, ivDocNo) {
     subject: iv.subject, sendDays: iv.sendDays, confirmDays: iv.confirmDays,
     refDocNo: iv.docNo,
     subTotal: iv.subTotal, vatAmount: iv.vatAmount, grandTotal: iv.grandTotal,
-    notes: iv.notes, createdBy: s.userName, createdAt: nowStr_()
+    notes: iv.notes, createdBy: s.userName, createdAt: nowStr_(),
+    createdByName: s.fullName || s.userName, updatedByName: s.fullName || s.userName
   };
   validateDoc_({ docType: 'RE', cusId: receipt.cusId, items: [{ prodName: 'temp' }] });
   receipt.docNo = generateDocNo_('RE');
