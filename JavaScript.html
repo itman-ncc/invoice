@@ -934,6 +934,31 @@ function currentPeriodKey() {
     return docPeriodKey(t);
 }
 
+/* คำนวณยอดคงเหลือสด ๆ ในฟอร์มรับชำระเงิน (เรียกจาก oninput ของ pay-amount) */
+function updatePayRemaining(due) {
+    const wrap = document.getElementById('pay-remain-wrap');
+    const el = document.getElementById('pay-amount');
+    if (!wrap || !el) return;
+    const amt = Number(el.value) || 0;
+    const remain = due - amt;
+    let txt, color, bg, border;
+    if (!(amt > 0)) {
+        txt = 'ยังไม่ได้กรอกจำนวนเงิน — คงค้าง ฿' + fmt(due);
+        color = '#b45309'; bg = '#fffbeb'; border = '#fcd34d';
+    } else if (Math.abs(remain) < 0.005) {
+        txt = '✅ ชำระครบพอดี — พร้อมออกใบเสร็จ/ใบกำกับภาษี';
+        color = '#15803d'; bg = '#f0fdf4'; border = '#86efac';
+    } else if (remain > 0) {
+        txt = 'ชำระแล้ว ฿' + fmt(amt) + ' — ยังคงเหลือ ฿' + fmt(remain);
+        color = '#b45309'; bg = '#fffbeb'; border = '#fcd34d';
+    } else {
+        txt = '⚠️ เกินกว่ายอดค้าง ฿' + fmt(-remain) + ' — ระบบจะไม่อนุมัติการบันทึก';
+        color = '#be123c'; bg = '#fff1f2'; border = '#fda4af';
+    }
+    wrap.style.background = bg; wrap.style.borderColor = border; wrap.style.color = color;
+    wrap.innerHTML = '<b>' + txt + '</b>';
+}
+
 /* วันที่+เวลาที่รับชำระ (จากชีต: DD/MM/YYYY, HH:MM:SS) → แสดง dd/mm/yy HH:MM แบบไทย */
 function fmtPayStamp(s) {
     const raw = String(s || '').trim();
@@ -1088,8 +1113,9 @@ async function promptAddPayment(ivDocNo) {
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
                 <label>วันที่ชำระ<input id="pay-date" type="date" value="${todayISO()}" style="${inputStyle}"></label>
-                <label>จำนวนเงิน (บาท)<input id="pay-amount" type="number" min="0" step="0.01" value="${due.toFixed(2)}" style="${inputStyle}"></label>
+                <label>จำนวนเงิน (บาท)<input id="pay-amount" type="number" min="0" step="0.01" value="${due.toFixed(2)}" oninput="updatePayRemaining(${Number(due.toFixed(2))})" style="${inputStyle}"></label>
             </div>
+            <div id="pay-remain-wrap" style="padding:7px 10px;border-radius:8px;border:1px dashed #cbd5e1;background:#fffbeb;font-size:13px"></div>
             <label>วิธีชำระเงิน
                 <select id="pay-method" onchange="document.getElementById('pay-detail-wrap').style.display=this.value!=='CASH'?'block':'none'" style="${inputStyle}">
                     <option value="CASH">เงินสด</option>
@@ -1107,6 +1133,7 @@ async function promptAddPayment(ivDocNo) {
         confirmButtonText: '✅ บันทึกการชำระ',
         cancelButtonText: 'ยกเลิก',
         focusConfirm: false,
+        didOpen: () => updatePayRemaining(Number(due.toFixed(2))),
         preConfirm: () => ({
             payDate: document.getElementById('pay-date').value || todayISO(),
             amount: Number(document.getElementById('pay-amount').value),
