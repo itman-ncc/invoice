@@ -189,9 +189,12 @@
             <div class="bg-white p-5 rounded-xl shadow-sm border border-stone-200 flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
                     <h2 class="text-xl font-bold text-slate-800">📝 ระบบออกเอกสารออนไลน์</h2>
-                    <p class="text-sm text-slate-600 mt-1">ใบเสนอราคา / ใบวางบิล-ใบส่งของ / ใบเสร็จ-ใบกำกับภาษี / บิลเงินสด — เลือกได้ว่าจะลงวันที่หรือไม่ลงวันที่</p>
+                    <p class="text-sm text-slate-600 mt-1">ใบเสนอราคา / ใบวางบิล-ใบส่งของ / ใบเสร็จ-ใบกำกับภาษี / ใบเสร็จเงินสด — เลือกได้ว่าจะลงวันที่หรือไม่ลงวันที่</p>
                 </div>
-                <button onclick="openProductModal()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-medium px-4 py-2 rounded-lg text-sm transition self-start md:self-auto shadow-sm">➕ เพิ่มสินค้าใหม่ลง DB</button>
+                <div class="flex flex-wrap gap-2 self-start md:self-auto">
+                    <button onclick="startCashSale()" class="bg-purple-600 hover:bg-purple-700 text-white font-medium px-4 py-2 rounded-lg text-sm transition shadow-sm">🧾 ขายเงินสด (ใบเสร็จทันที)</button>
+                    <button onclick="openProductModal()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-medium px-4 py-2 rounded-lg text-sm transition shadow-sm">➕ เพิ่มสินค้าใหม่ลง DB</button>
+                </div>
             </div>
 
             <div class="bg-white p-6 rounded-xl shadow-sm border border-stone-200 space-y-6">
@@ -203,7 +206,7 @@
                             <option value="QT">ใบเสนอราคา (QT)</option>
                             <option value="IV">ใบวางบิล / ใบส่งของ (IV)</option>
                             <option value="RE">ใบเสร็จ / ใบกำกับภาษี (RE)</option>
-                            <option value="RC">บิลเงินสด (RC)</option>
+                            <option value="RC">ใบเสร็จเงินสด (RC) — ไม่ต้องมี QT/IV</option>
                         </select>
                     </div>
                     <div>
@@ -241,6 +244,26 @@
                                 <input type="number" id="form-doc-confirm-day" value="30" min="1" class="w-full p-2 border border-slate-300 rounded-lg text-xs font-mono text-center">
                                 <span class="text-xs text-slate-600">วัน</span>
                             </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="cash-pay-fields" class="hidden bg-purple-50/60 p-4 rounded-xl border border-purple-200/80 space-y-3">
+                    <div class="text-xs font-bold text-purple-900">💰 รับชำระเงินทันที (ใบเสร็จเงินสด) — ระบบบันทึกการชำระให้อัตโนมัติเมื่อกดบันทึก</div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-700 mb-1">วิธีชำระเงิน</label>
+                            <select id="form-pay-method" onchange="document.getElementById('form-pay-detail-wrap').style.display=(this.value==='CHEQUE'||this.value==='OTHER')?'block':'none'"
+                                class="w-full p-2 border border-slate-300 rounded-lg text-xs">
+                                <option value="CASH">เงินสด</option>
+                                <option value="TRANSFER">เงินโอน</option>
+                                <option value="CHEQUE">เช็ค</option>
+                                <option value="OTHER">อื่นๆ (ระบุ)</option>
+                            </select>
+                        </div>
+                        <div id="form-pay-detail-wrap" style="display:none">
+                            <label class="block text-xs font-semibold text-slate-700 mb-1">ระบุเพิ่มเติม (เลขที่เช็ค/ธนาคาร/รายละเอียด)</label>
+                            <input type="text" id="form-pay-detail" placeholder="เช่น เช็คเลขที่ 123456 ธ.กสิกรฯ" class="w-full p-2 border border-slate-300 rounded-lg text-xs">
                         </div>
                     </div>
                 </div>

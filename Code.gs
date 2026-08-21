@@ -86,7 +86,9 @@ const DB_SCHEMA = [
   { name: 'AuditLogs',     headers: ['วัน-เวลา','ผู้ใช้','การกระทำ','เลขที่เอกสาร','รายละเอียด'],
     widths: [150,90,110,110,480] },
   { name: 'Sessions',      headers: ['Token','รหัสผู้ใช้','ชื่อผู้ใช้','ระดับ','สร้างเมื่อ','หมดอายุ'],
-    widths: [360,90,120,90,150,150] }
+    widths: [360,90,120,90,150,150] },
+  { name: 'Payments',      headers: ['รหัสชำระเงิน','เลขที่เอกสาร','วันที่ชำระ','ยอดที่ชำระ','วิธีชำระเงิน','รายละเอียด (เลขเช็ค/โอน/อื่นๆ)','บันทึกโดย','บันทึกเมื่อ'],
+    widths: [110,110,110,120,110,240,90,150], moneyCols: ['D'] }
 ];
 
 function onOpen() {
@@ -827,9 +829,24 @@ function apiSaveDocument(token, doc) {
     doc.createdAt = nowStr_();
     sh.appendRow(docRowOf_(doc));
     appendItems_(doc.docNo, doc.items);
+
+    /* ใบเสร็จเงินสด (RC): บันทึกการชำระเงินให้อัตโนมัติ — ข้าม QT/IV ได้ทันที */
+    let payId = '';
+    if (doc.docType === 'RC') {
+      const method = PAY_METHODS[doc.payMethod] ? doc.payMethod : 'CASH';
+      const detail = String(doc.payDetail || '').trim();
+      if ((method === 'CHEQUE' || method === 'OTHER') && !detail) {
+        throw new Error(method === 'CHEQUE' ? 'กรุณาระบุเลขที่เช็ค/ธนาคาร' : 'กรุณาระบุรายละเอียดวิธีชำระเงิน');
+      }
+      payId = recordPayment_(s.userName, doc.docNo, doc.docDate, doc.grandTotal, method, detail);
+    }
+
     logAudit_(s.userName, 'CreateDoc', doc.docNo,
-      'สร้าง' + typeLabel_(doc.docType) + ' ลูกค้า: ' + (doc.cusName || doc.cusId) + ' ยอดรวม ' + doc.grandTotal.toFixed(2) + ' บาท');
-    return { ok: true, doc: withItems_(doc) };
+      'สร้าง' + typeLabel_(doc.docType) + ' ลูกค้า: ' + (doc.cusName || doc.cusId) + ' ยอดรวม ' + doc.grandTotal.toFixed(2) + ' บาท'
+      + (payId ? ' | ชำระแล้ว (' + PAY_METHODS[doc.payMethod && PAY_METHODS[doc.payMethod] ? doc.payMethod : 'CASH'] + ')' : ''));
+    const saved = withItems_(doc);
+    if (payId) { saved.payments = getPaymentsOf_(doc.docNo); saved.paidTotal = doc.grandTotal; }
+    return { ok: true, doc: saved };
   }
 
   const idx = findRowById_(sh, doc.docNo);
@@ -852,7 +869,7 @@ function withItems_(doc) {
 }
 
 function typeLabel_(t) {
-  return { QT: 'ใบเสนอราคา', IV: 'ใบวางบิล/ใบส่งของ', RE: 'ใบเสร็จ/ใบกำกับภาษี', RC: 'บิลเงินสด' }[t] || 'เอกสาร';
+  return { QT: 'ใบเสนอราคา', IV: 'ใบวางบิล/ใบส่งของ', RE: 'ใบเสร็จ/ใบกำกับภาษี', RC: 'ใบเสร็จเงินสด' }[t] || 'เอกสาร';
 }
 
 function apiCancelDocument(token, docNo, reason) {
@@ -908,6 +925,112 @@ function apiLogPrint(token, docNo, channel) {
   const label = channel === 'PDF' ? 'ส่งออก PDF' : 'สั่งพิมพ์เอกสาร';
   logAudit_(s.userName, channel === 'PDF' ? 'ExportPDF' : 'Print', docNo, label + ' ' + docNo);
   return { ok: true };
+}
+
+/* ============================================================
+ * SECTION 7.5: PAYMENTS (บันทึกรับชำระเงิน) + ใบเสร็จเงินสด (RC)
+ * ============================================================ */
+const PAY_METHODS = { CASH: 'เงินสด', TRANSFER: 'เงินโอน', CHEQUE: 'เช็ค', OTHER: 'อื่นๆ' };
+
+function getPaidTotal_(docNo) {
+  return readAll_('Payments')
+    .filter(function(r) { return String(r[1]) === String(docNo); })
+    .reduce(function(s, r) { return s + (Number(r[3]) || 0); }, 0);
+}
+
+function getPaymentsOf_(docNo) {
+  return readAll_('Payments')
+    .filter(function(r) { return String(r[1]) === String(docNo); })
+    .map(function(r) {
+      return { payId: String(r[0]), docNo: String(r[1]), payDate: String(r[2]),
+               amount: Number(r[3]) || 0, method: String(r[4]), methodLabel: PAY_METHODS[String(r[4])] || String(r[4]),
+               detail: String(r[5]), createdBy: String(r[6]), createdAt: String(r[7]) };
+    });
+}
+
+function recordPayment_(username, docNo, payDate, amount, method, detail) {
+  const payId = nextId_('Payments', 'PAY-', 4);
+  sheet_('Payments').appendRow([payId, String(docNo), payDate || todayStr_(), Number(amount),
+                                method, String(detail || ''), username, nowStr_()]);
+  return payId;
+}
+
+/* บันทึกการรับชำระเงินของใบวางบิล (IV) — ต้องชำระครบก่อนออกใบเสร็จ RE */
+function apiAddPayment(token, docNo, payDate, amount, method, detail) {
+  const s = requireAuth_(token);
+  const sh = sheet_('Documents');
+  const idx = findRowById_(sh, docNo);
+  if (idx < 0) throw new Error('ไม่พบเอกสาร ' + docNo);
+  const vals = sh.getRange(idx, 1, 1, 19).getValues()[0];
+  if (String(vals[1]) !== 'IV') throw new Error('บันทึกชำระเงินได้เฉพาะใบวางบิล (IV) เท่านั้น');
+  if (String(vals[13]) === 'Cancelled') throw new Error('เอกสารถูกยกเลิกแล้ว');
+  amount = Number(amount);
+  if (!(amount > 0)) throw new Error('จำนวนเงินต้องมากกว่า 0');
+  if (!PAY_METHODS[method]) throw new Error('กรุณาเลือกวิธีชำระเงิน');
+  detail = String(detail || '').trim();
+  if ((method === 'CHEQUE' || method === 'OTHER') && !detail) {
+    throw new Error(method === 'CHEQUE' ? 'กรุณาระบุเลขที่เช็ค/ธนาคาร' : 'กรุณาระบุรายละเอียดวิธีชำระเงิน');
+  }
+  const grandTotal = Number(vals[12]) || 0;
+  const paidBefore = getPaidTotal_(docNo);
+  if (paidBefore + amount > grandTotal + 0.01) {
+    throw new Error('ยอดเกินคงค้าง! ชำระแล้ว ' + paidBefore.toFixed(2) + ' / ทั้งหมด ' + grandTotal.toFixed(2) + ' → ชำระได้อีกไม่เกิน ' + Math.max(0, grandTotal - paidBefore).toFixed(2));
+  }
+  const payId = recordPayment_(s.userName, docNo, payDate, amount, method, detail);
+  logAudit_(s.userName, 'AddPayment', docNo,
+    payId + ' | ' + PAY_METHODS[method] + (detail ? ' (' + detail + ')' : '') + ' | ' + amount.toFixed(2) + ' บาท');
+  return { ok: true, payId: payId, paidTotal: paidBefore + amount, grandTotal: grandTotal };
+}
+
+/* ดึงประวัติการชำระเงินของเอกสาร */
+function apiGetPayments(token, docNo) {
+  requireAuth_(token);
+  const sh = sheet_('Documents');
+  const idx = findRowById_(sh, docNo);
+  if (idx < 0) throw new Error('ไม่พบเอกสาร ' + docNo);
+  const grandTotal = Number(sh.getRange(idx, 13).getValue()) || 0;
+  const payments = getPaymentsOf_(docNo);
+  const paidTotal = payments.reduce(function(s, p) { return s + p.amount; }, 0);
+  return { ok: true, payments: payments, paidTotal: paidTotal, grandTotal: grandTotal };
+}
+
+/* IV → RE: ออกใบเสร็จ/ใบกำกับภาษีได้เมื่อชำระเงินครบแล้วเท่านั้น */
+function apiConvertBillingToReceipt(token, ivDocNo) {
+  const s = requireAuth_(token);
+  const all = rawDocuments_();
+  const iv = all.filter(function(d) { return d.docNo === String(ivDocNo); })[0];
+  if (!iv) throw new Error('ไม่พบใบวางบิล ' + ivDocNo);
+  if (iv.docType !== 'IV') throw new Error('เอกสารนี้ไม่ใช่ใบวางบิล');
+  if (iv.status !== 'Active') throw new Error('ใบวางบิลนี้ถูกยกเลิกหรือออกใบเสร็จไปแล้ว');
+
+  const paid = getPaidTotal_(iv.docNo);
+  if (paid < iv.grandTotal - 0.01) {
+    throw new Error('ยังชำระเงินไม่ครบ (ชำระแล้ว ' + paid.toFixed(2) + ' / ทั้งหมด ' + iv.grandTotal.toFixed(2) + ') — กรุณาบันทึกการรับชำระเงิน (💰) ก่อนออกใบเสร็จ');
+  }
+
+  const receipt = {
+    docType: 'RE',
+    docDate: todayStr_(),
+    showDateOnPrint: true,
+    cusId: iv.cusId, cusName: iv.cusName,
+    subject: iv.subject, sendDays: iv.sendDays, confirmDays: iv.confirmDays,
+    refDocNo: iv.docNo,
+    subTotal: iv.subTotal, vatAmount: iv.vatAmount, grandTotal: iv.grandTotal,
+    notes: iv.notes, createdBy: s.userName, createdAt: nowStr_()
+  };
+  validateDoc_({ docType: 'RE', cusId: receipt.cusId, items: [{ prodName: 'temp' }] });
+  receipt.docNo = generateDocNo_('RE');
+  receipt.status = 'Active';
+  sheet_('Documents').appendRow(docRowOf_(receipt));
+  appendItems_(receipt.docNo, itemsOf_(iv.docNo));
+
+  const sh = sheet_('Documents');
+  const idx = findRowById_(sh, iv.docNo);
+  sh.getRange(idx, 14).setValue('Paid');
+  sh.getRange(idx, 19).setValue(nowStr_());
+
+  logAudit_(s.userName, 'ConvertDoc', receipt.docNo, 'ออกใบเสร็จ ' + receipt.docNo + ' จากใบวางบิล ' + iv.docNo + ' (ชำระครบ ' + paid.toFixed(2) + ' บาท)');
+  return { ok: true, receipt: withItems_(receipt) };
 }
 
 /* ============================================================

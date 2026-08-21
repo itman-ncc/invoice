@@ -15,7 +15,8 @@ let statusChart = null;
 
 const ITEMS_PER_PAGE = 20;
 const THAI_MONTHS = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
-const TYPE_LABELS = { QT:'ใบเสนอราคา', IV:'ใบวางบิล/ใบส่งของ', RE:'ใบเสร็จ/ใบกำกับภาษี', RC:'บิลเงินสด' };
+const TYPE_LABELS = { QT:'ใบเสนอราคา', IV:'ใบวางบิล/ใบส่งของ', RE:'ใบเสร็จ/ใบกำกับภาษี', RC:'ใบเสร็จเงินสด' };
+const PAY_METHODS = { CASH:'เงินสด', TRANSFER:'เงินโอน', CHEQUE:'เช็ค', OTHER:'อื่นๆ' };
 
 const Toast = Swal.mixin({ toast:true, position:'top-end', showConfirmButton:false, timer:2200, timerProgressBar:true });
 
@@ -355,11 +356,22 @@ function handleCustomerSelect() {
 }
 
 function handleDocTypeChange() {
-    const isQT = document.getElementById('form-doc-type').value === 'QT';
+    const t = document.getElementById('form-doc-type').value;
+    const isQT = t === 'QT';
     document.getElementById('quotation-fields-container').classList.toggle('hidden', !isQT);
+    const payBox = document.getElementById('cash-pay-fields');
+    if (payBox) payBox.classList.toggle('hidden', t !== 'RC');
     if (!editingDocNo) {
         document.getElementById('form-doc-no').value = '(รันอัตโนมัติเมื่อบันทึก)';
     }
+}
+
+/* ขายเงินสด: สร้างใบเสร็จทันที ไม่ต้องมี QT/IV */
+function startCashSale() {
+    resetDocForm();
+    document.getElementById('form-doc-type').value = 'RC';
+    handleDocTypeChange();
+    switchTab('create-doc');
 }
 
 function refreshProductsDatalist() {
@@ -481,7 +493,7 @@ function collectDocPayload() {
         it.unitPrice = Number(document.getElementById('item-price-' + i)?.value ?? it.unitPrice) || 0;
         it.totalPrice = it.qty * it.unitPrice;
     });
-    return {
+    const payload = {
         docNo: editingDocNo || '',
         docType: type,
         docDate: document.getElementById('form-doc-date').value || todayISO(),
@@ -495,6 +507,11 @@ function collectDocPayload() {
         vatEnabled: document.getElementById('calc-vat-check').checked,
         items: JSON.parse(JSON.stringify(formItems))
     };
+    if (type === 'RC') {
+        payload.payMethod = document.getElementById('form-pay-method')?.value || 'CASH';
+        payload.payDetail = document.getElementById('form-pay-detail')?.value?.trim() || '';
+    }
+    return payload;
 }
 
 async function saveAndPreviewDoc() {
@@ -504,6 +521,10 @@ async function saveAndPreviewDoc() {
     const validItems = payload.items.filter(it => it.prodName && it.prodName.trim() !== '' && it.qty > 0);
     if (validItems.length === 0) { Swal.fire('ข้อมูลไม่ครบ', 'ต้องมีรายการสินค้าอย่างน้อย 1 รายการ (ชื่อ + จำนวน > 0)', 'warning'); return; }
     if (payload.items.some(it => !it.prodName.trim())) { Swal.fire('ข้อมูลไม่ครบ', 'มีแถวรายการที่ยังไม่ได้ระบุชื่อสินค้า', 'warning'); return; }
+    if (payload.docType === 'RC' && (payload.payMethod === 'CHEQUE' || payload.payMethod === 'OTHER') && !payload.payDetail) {
+        Swal.fire('ข้อมูลไม่ครบ', payload.payMethod === 'CHEQUE' ? 'กรุณาระบุเลขที่เช็ค/ธนาคาร' : 'กรุณาระบุรายละเอียดวิธีชำระเงิน', 'warning');
+        return;
+    }
 
     const btn = document.getElementById('save-doc-btn');
     btn.disabled = true;
@@ -627,6 +648,7 @@ function renderDocListTable() {
         const typeBadge = `<span class="font-bold px-2 py-0.5 rounded border ${
             d.docType === 'QT' ? 'text-amber-800 bg-amber-50 border-amber-200' :
             d.docType === 'IV' ? 'text-blue-800 bg-blue-50 border-blue-200' :
+            d.docType === 'RC' ? 'text-purple-800 bg-purple-50 border-purple-200' :
             'text-slate-700 bg-slate-100 border-slate-200'}">${TYPE_LABELS[d.docType] || d.docType}</span>`;
 
         return `
@@ -642,6 +664,8 @@ function renderDocListTable() {
                 <button onclick="viewDocPreview('${esc(d.docNo)}')" class="text-xs font-bold text-slate-600 hover:text-emerald-600" title="พรีวิว/พิมพ์">🖨️</button>
                 ${d.status === 'Active' ? `<button onclick="editDocument('${esc(d.docNo)}')" class="text-xs font-bold text-blue-600 hover:underline" title="แก้ไข">✏️</button>` : ''}
                 ${d.docType === 'QT' && d.status === 'Active' ? `<button onclick="convertQtToBilling('${esc(d.docNo)}')" class="text-xs font-bold text-indigo-600 hover:underline" title="สร้างใบวางบิล">➡️IV</button>` : ''}
+                ${d.docType === 'IV' && d.status === 'Active' ? `<button onclick="promptAddPayment('${esc(d.docNo)}')" class="text-xs font-bold text-emerald-600 hover:underline" title="บันทึกรับชำระเงิน">💰</button>` : ''}
+                ${d.docType === 'IV' && d.status === 'Active' ? `<button onclick="convertBillingToReceipt('${esc(d.docNo)}')" class="text-xs font-bold text-purple-600 hover:underline" title="ออกใบเสร็จ (ต้องชำระครบก่อน)">➡️RE</button>` : ''}
                 ${d.status !== 'Cancelled' ? `<button onclick="cancelDocumentPrompt('${esc(d.docNo)}')" class="text-xs font-bold text-rose-500 hover:text-rose-700" title="ยกเลิก">✕</button>` : ''}
                 <button onclick="exportSinglePdf('${esc(d.docNo)}')" class="text-xs font-bold text-purple-600 hover:underline" title="Export PDF">📄</button>
             </td>
@@ -649,9 +673,21 @@ function renderDocListTable() {
     }).join('');
 }
 
-function viewDocPreview(docNo) {
+async function viewDocPreview(docNo) {
     const doc = BOOT.documents.find(d => d.docNo === docNo);
-    if (doc) { renderPrintPreview(doc); switchTab('print-preview'); }
+    if (!doc) return;
+    await enrichPayments_(doc);
+    renderPrintPreview(doc); switchTab('print-preview');
+}
+
+/* ดึงประวัติการชำระเงินมาแนบกับเอกสาร (IV/RE/RC) ก่อนพรีวิว */
+async function enrichPayments_(doc) {
+    if (!doc || !['IV', 'RE', 'RC'].includes(doc.docType)) return;
+    try {
+        const r = await gs('apiGetPayments', TOKEN, doc.docNo);
+        doc.payments = r.payments;
+        doc.paidTotal = r.paidTotal;
+    } catch (e) { /* ไม่มีข้อมูลชำระเงินก็พรีวิวได้ปกติ */ }
 }
 
 async function convertQtToBilling(qtDocNo) {
@@ -671,6 +707,86 @@ async function convertQtToBilling(qtDocNo) {
         renderPrintPreview(res.invoice);
         switchTab('print-preview');
         Swal.fire('สำเร็จ!', `สร้างใบวางบิลเลขที่ ${res.invoice.docNo} (อ้างอิง ${qtDocNo})`, 'success');
+    } catch (e) { Swal.fire('ไม่สำเร็จ', e.message, 'error'); }
+}
+
+/* 💰 บันทึกรับชำระเงินของใบวางบิล */
+async function promptAddPayment(ivDocNo) {
+    const doc = BOOT.documents.find(d => d.docNo === ivDocNo);
+    const grand = doc ? (Number(doc.grandTotal) || 0) : 0;
+    let paid = 0;
+    try { const r = await gs('apiGetPayments', TOKEN, ivDocNo); paid = Number(r.paidTotal) || 0; } catch (e) {}
+    const due = Math.max(0, grand - paid);
+    const inputStyle = 'width:100%;padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;font-size:13px;margin-top:2px';
+    const result = await Swal.fire({
+        title: '💰 บันทึกรับชำระเงิน',
+        html: `<div style="text-align:left;font-size:13.5px;display:grid;gap:9px">
+            <div style="background:#f8fafc;padding:8px 10px;border-radius:8px;border:1px solid #e2e8f0">
+                เอกสาร: <b>${esc(ivDocNo)}</b><br>
+                ยอดทั้งหมด: <b>฿${fmt(grand)}</b> · ชำระแล้ว: <b style="color:#16a34a">฿${fmt(paid)}</b> · คงค้าง: <b style="color:#e11d48">฿${fmt(due)}</b>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                <label>วันที่ชำระ<input id="pay-date" type="date" value="${todayISO()}" style="${inputStyle}"></label>
+                <label>จำนวนเงิน (บาท)<input id="pay-amount" type="number" min="0" step="0.01" value="${due.toFixed(2)}" style="${inputStyle}"></label>
+            </div>
+            <label>วิธีชำระเงิน
+                <select id="pay-method" onchange="document.getElementById('pay-detail-wrap').style.display=(this.value==='CHEQUE'||this.value==='OTHER')?'block':'none'" style="${inputStyle}">
+                    <option value="CASH">เงินสด</option>
+                    <option value="TRANSFER">เงินโอน</option>
+                    <option value="CHEQUE">เช็ค</option>
+                    <option value="OTHER">อื่นๆ (ระบุ)</option>
+                </select>
+            </label>
+            <div id="pay-detail-wrap" style="display:none">
+                <label>ระบุเพิ่มเติม (เลขที่เช็ค/ธนาคาร/รายละเอียด)<input id="pay-detail" type="text" style="${inputStyle}"></label>
+            </div>
+        </div>`,
+        showCancelButton: true,
+        confirmButtonText: '✅ บันทึกการชำระ',
+        cancelButtonText: 'ยกเลิก',
+        focusConfirm: false,
+        preConfirm: () => ({
+            payDate: document.getElementById('pay-date').value || todayISO(),
+            amount: Number(document.getElementById('pay-amount').value),
+            method: document.getElementById('pay-method').value,
+            detail: document.getElementById('pay-detail')?.value?.trim() || ''
+        })
+    });
+    if (!result.isConfirmed) return;
+    const v = result.value;
+    if (!(v.amount > 0)) { Swal.fire('ข้อมูลไม่ถูกต้อง', 'จำนวนเงินต้องมากกว่า 0', 'warning'); return; }
+    try {
+        const res = await gs('apiAddPayment', TOKEN, ivDocNo, v.payDate, v.amount, v.method, v.detail);
+        await loadBootstrapSilent();
+        const full = res.paidTotal >= res.grandTotal - 0.01;
+        Swal.fire({
+            icon: 'success',
+            title: 'รับชำระเงินสำเร็จ',
+            html: `บันทึก <b>฿${fmt(v.amount)}</b> (${PAY_METHODS[v.method]})<br>รวมชำระแล้ว <b>฿${fmt(res.paidTotal)}</b> / ฿${fmt(res.grandTotal)}`
+                + (full ? '<br><br>✅ <b>ชำระครบแล้ว</b> — กด ➡️RE ในรายการเอกสารเพื่อออกใบเสร็จได้' : ''),
+            confirmButtonText: full ? '🧾 ออกใบเสร็จเลย' : 'ตกลง'
+        }).then(r => { if (full && r.isConfirmed) convertBillingToReceipt(ivDocNo); });
+    } catch (e) { Swal.fire('ไม่สำเร็จ', e.message, 'error'); }
+}
+
+/* ➡️RE ออกใบเสร็จ/ใบกำกับภาษีจากใบวางบิล (ต้องชำระครบ) */
+async function convertBillingToReceipt(ivDocNo) {
+    const result = await Swal.fire({
+        icon: 'question',
+        title: 'ออกใบเสร็จ/ใบกำกับภาษี?',
+        html: `สร้าง <b>ใบเสร็จ (RE)</b> จากใบวางบิล <b>${esc(ivDocNo)}</b><br><span class="text-xs text-slate-500">(ระบบจะตรวจว่าชำระเงินครบแล้วก่อน — IV เปลี่ยนสถานะเป็น Paid)</span>`,
+        showCancelButton: true,
+        confirmButtonText: '🧾 ออกใบเสร็จ',
+        cancelButtonText: 'ยกเลิก'
+    });
+    if (!result.isConfirmed) return;
+    try {
+        const res = await gs('apiConvertBillingToReceipt', TOKEN, ivDocNo);
+        await loadBootstrapSilent();
+        currentPreviewDoc = res.receipt;
+        renderPrintPreview(res.receipt);
+        switchTab('print-preview');
+        Swal.fire('สำเร็จ!', `ออกใบเสร็จเลขที่ ${res.receipt.docNo} (อ้างอิง ${ivDocNo})`, 'success');
     } catch (e) { Swal.fire('ไม่สำเร็จ', e.message, 'error'); }
 }
 
@@ -755,7 +871,7 @@ function renderPrintPreview(doc) {
                         <p class="text-xs text-slate-600">โทร: ${esc(st.shopPhone)} | เลขประจำตัวผู้เสียภาษี: ${esc(st.shopTaxId)}</p>
                     </div>
                     <div class="text-right">
-                        <h2 class="text-lg font-bold uppercase tracking-wide ${doc.docType === 'QT' ? 'text-emerald-800' : 'text-blue-800'}">${TYPE_LABELS[doc.docType]}</h2>
+                        <h2 class="text-lg font-bold uppercase tracking-wide ${doc.docType === 'QT' ? 'text-emerald-800' : doc.docType === 'RC' ? 'text-purple-800' : 'text-blue-800'}">${TYPE_LABELS[doc.docType]}</h2>
                         <p class="text-xs text-slate-700 font-mono font-bold mt-1">เลขที่: ${esc(doc.docNo)}</p>
                         <p class="text-xs text-slate-500 mt-1">วันที่: <strong class="font-mono">${dateText}</strong></p>
                         ${doc.refDocNo ? `<p class="text-xs text-slate-500">อ้างอิง: ${esc(doc.refDocNo)}</p>` : ''}
@@ -794,7 +910,7 @@ function renderPrintPreview(doc) {
                         <p class="text-slate-600 text-[11px]">ผู้จัดการ / ผู้มีอำนาจลงนาม</p>
                         <p class="text-slate-400 text-[10px] pt-1">วันที่ _____/_____/_________</p>
                     </div>
-                </div>` : doc.docType === 'RE' ? `
+                </div>` : (doc.docType === 'RE' || doc.docType === 'RC') ? `
                 <div class="grid grid-cols-2 gap-2 text-center text-xs text-slate-800 pt-4 border-t border-slate-300">
                     <div>
                         <p class="mb-9 font-medium">ในนาม ${esc(st.shopName)}</p>
@@ -856,6 +972,18 @@ function renderPrintPreview(doc) {
                         <div class="flex justify-between font-bold text-slate-900 text-sm border-t border-slate-300 pt-1">
                             <span>รวมทั้งสิ้น:</span><span class="font-mono text-emerald-800">฿${fmt(doc.grandTotal)}</span>
                         </div>
+                        ${(doc.docType === 'RE' || doc.docType === 'RC') && (doc.payments || []).length ? `
+                        <div class="border-t border-slate-300 pt-1 mt-1 space-y-0.5">
+                            ${doc.payments.map(p => `
+                            <div class="flex justify-between text-slate-700">
+                                <span>ชำระโดย: <strong>${esc(p.methodLabel || PAY_METHODS[p.method] || p.method)}</strong>${p.detail ? ' <span class="text-slate-500">(' + esc(p.detail) + ')</span>' : ''} <span class="text-slate-400 text-[10px]">${fmtDateTH(p.payDate)}</span></span>
+                                <span class="font-mono">฿${fmt(p.amount)}</span>
+                            </div>`).join('')}
+                            ${(doc.paidTotal != null && doc.paidTotal < doc.grandTotal - 0.01) ? `
+                            <div class="flex justify-between font-bold text-rose-700">
+                                <span>คงค้าง:</span><span class="font-mono">฿${fmt(doc.grandTotal - doc.paidTotal)}</span>
+                            </div>` : `<div class="text-right text-emerald-700 font-bold text-[11px]">✔ ชำระเงินเรียบร้อยแล้ว</div>`}
+                        </div>` : ''}
                     </div>
                 </div>` : `
                 <div class="text-right text-xs text-slate-500 italic py-2">(รายการยกไปรวมในหน้าถัดไป...)</div>`}
