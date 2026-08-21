@@ -115,3 +115,64 @@
     .overflow-x-auto::-webkit-scrollbar { height: 8px; }
     .overflow-x-auto::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
 </style>
+
+/* ---------- Global working-status effects ---------- */
+.top-progress {
+    display: none;
+    position: fixed; top: 0; left: 0; right: 0;
+    height: 4px; z-index: 9999; pointer-events: none;
+    background: linear-gradient(90deg, #10b981, #3b82f6, #8b5cf6);
+    background-size: 200% 100%;
+    animation: gp-slide 0.9s linear infinite;
+}
+body.gs-busy .top-progress { display: block; }
+@keyframes gp-slide {
+    0% { background-position: 0% 0; }
+    100% { background-position: -200% 0; }
+}
+#busy-pill {
+    display: none;
+    position: fixed; bottom: 18px; right: 18px; z-index: 9999;
+    pointer-events: none;
+    align-items: center; gap: 8px;
+    padding: 8px 14px;
+    background: #1e293b; color: #fff;
+    font-size: 12px; font-weight: 600;
+    border-radius: 999px;
+    box-shadow: 0 6px 20px rgba(0,0,0,.35);
+    animation: gp-pop .25s ease-out;
+}
+body.gs-busy #busy-pill { display: flex; }
+#busy-pill::before {
+    content: '';
+    width: 12px; height: 12px; flex: none;
+    border: 2px solid rgba(255,255,255,.35);
+    border-top-color: #fff; border-radius: 50%;
+    animation: gp-spin .7s linear infinite;
+}
+@keyframes gp-spin { to { transform: rotate(360deg); } }
+@keyframes gp-pop { from { transform: translateY(8px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+/* ปุ่มที่เพิ่งถูกคลิก → pulse + spinner มุมขวา */
+button.btn-flash {
+    position: relative !important;
+    overflow: hidden;
+    animation: gp-pulse .45s ease-out;
+}
+button.btn-flash::after {
+    content: '';
+    position: absolute; right: 6px; top: 50%;
+    width: 11px; height: 11px; margin-top: -5.5px;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    opacity: .55; border-radius: 50%;
+    animation: gp-spin .7s linear infinite;
+}
+@keyframes gp-pulse {
+    0% { transform: scale(1); filter: brightness(1); }
+    40% { transform: scale(.96); filter: brightness(.92); }
+    100% { transform: scale(1); filter: brightness(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .top-progress, button.btn-flash, button.btn-flash::after, #busy-pill::before { animation: none !important; }
+}

@@ -55,17 +55,25 @@ function migrateSettings_() {
     const sh = SpreadsheetApp.openById(SHEET_ID).getSheetByName('Settings');
     if (!sh) return;
     const last = sh.getLastRow();
-    let hasFolderId = false, hasLogoUrl = false;
+    let hasFolderId = false, hasLogoUrl = false, hasClaimDays = false, hasFiscalMode = false, hasFiscalMonth = false, hasFiscalDay = false;
     if (last > 1) {
       const keys = sh.getRange(2, 1, last - 1, 1).getValues();
       keys.forEach(function(r) {
         const k = String(r[0]);
         if (k === 'pdfFolderId') hasFolderId = true;
         if (k === 'logoUrl') hasLogoUrl = true;
+        if (k === 'ivClaimDays') hasClaimDays = true;
+        if (k === 'fiscalMode') hasFiscalMode = true;
+        if (k === 'fiscalStartMonth') hasFiscalMonth = true;
+        if (k === 'fiscalStartDay') hasFiscalDay = true;
       });
     }
     if (!hasFolderId) sh.appendRow(['pdfFolderId', DEFAULT_PDF_FOLDER_ID]);
     if (!hasLogoUrl) sh.appendRow(['logoUrl', '']);
+    if (!hasClaimDays) sh.appendRow(['ivClaimDays', '7']);
+    if (!hasFiscalMode) sh.appendRow(['fiscalMode', 'calendar']);
+    if (!hasFiscalMonth) sh.appendRow(['fiscalStartMonth', '1']);
+    if (!hasFiscalDay) sh.appendRow(['fiscalStartDay', '1']);
   } catch (e) {}
 }
 
@@ -289,9 +297,13 @@ function seedSettings_(ss, log) {
     ['managerName',    'นายสมศักดิ์ มั่งมี'],
     ['signatoryName',  'นางสาววิภาดา ใจดี'],
     ['vatRate',        '0.07'],
+    ['ivClaimDays',    '7'],
+    ['fiscalMode',     'calendar'],
+    ['fiscalStartMonth', '1'],
+    ['fiscalStartDay',   '1'],
     ['pdfFolderName',  'SmartBilling_PDF']
   ]);
-  log.push('🌱 Settings: 10 ค่า');
+  log.push('🌱 Settings: 14 ค่า');
 }
 
 function seedDocuments_(ss, log) {
@@ -969,12 +981,53 @@ function apiSaveSettings(token, settings) {
  * ============================================================ */
 const DOC_TYPES = { QT: 'QT', IV: 'IV', RE: 'RE', RC: 'RC' };
 
+/* ============================================================
+ * รอบบัญชี / ปีปฎิทิน — กำหนดฐานปีของเลขที่เอกสารและการแสดงรายการ
+ * fiscalMode = 'calendar' (ม.ค.–ธ.ค.) หรือ 'fiscal' (เริ่มวันที่กำหนด)
+ * ============================================================ */
+function fiscalConfig_(st) {
+  st = st || getSettings_();
+  const mode = String(st.fiscalMode || 'calendar') === 'fiscal' ? 'fiscal' : 'calendar';
+  let m = parseInt(st.fiscalStartMonth, 10); if (!(m >= 1 && m <= 12)) m = 1;
+  let d = parseInt(st.fiscalStartDay, 10); if (!(d >= 1 && d <= 31)) d = 1;
+  return { mode: mode, month: m, day: d };
+}
+
+/* วันที่ (yyyy-MM-dd) → { year: ปีรอบ(ค.ศ.), startIso, endIso } */
+function periodOfDate_(iso, cfg) {
+  cfg = cfg || fiscalConfig_();
+  let dt = normDateStr_(iso);
+  if (!dt) dt = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  const y = parseInt(dt.slice(0, 4), 10);
+  const md = dt.slice(5, 10);
+  let py;
+  if (cfg.mode === 'calendar') py = y;
+  else {
+    const sm = ('0' + cfg.month).slice(-2), sd = ('0' + cfg.day).slice(-2);
+    py = (md >= sm + '-' + sd) ? y : y - 1;
+  }
+  const range = periodRange_(py, cfg);
+  return { year: py, startIso: range.startIso, endIso: range.endIso };
+}
+
+function periodRange_(py, cfg) {
+  cfg = cfg || fiscalConfig_();
+  if (cfg.mode === 'calendar') return { startIso: py + '-01-01', endIso: py + '-12-31' };
+  const mm = ('0' + cfg.month).slice(-2), dd = ('0' + cfg.day).slice(-2);
+  const startIso = py + '-' + mm + '-' + dd;
+  const end = new Date(Date.UTC(py + 1, cfg.month - 1, cfg.day));
+  end.setUTCDate(end.getUTCDate() - 1);
+  const endIso = Utilities.formatDate(end, 'UTC', 'yyyy-MM-dd');
+  return { startIso: startIso, endIso: endIso };
+}
+
 function generateDocNo_(type) {
   const lock = LockService.getScriptLock();
   lock.waitLock(15000);
   try {
-    const year = new Date().getFullYear();
-    const key = type + '-' + year;
+    const cfg = fiscalConfig_();
+    const per = periodOfDate_(null, cfg); /* ใช้วันนี้ */
+    const key = type + '-' + per.year;
     const sh = sheet_('Counters');
     const data = sh.getDataRange().getValues();
     let last = 0, rowIdx = -1;
@@ -984,7 +1037,7 @@ function generateDocNo_(type) {
     last++;
     if (rowIdx < 0) sh.appendRow([key, last]);
     else sh.getRange(rowIdx, 2).setValue(last);
-    return type + String(year).slice(-2) + '-' + pad_(last, 4);
+    return type + String(per.year).slice(-2) + '-' + pad_(last, 4);
   } finally {
     lock.releaseLock();
   }
@@ -1450,6 +1503,16 @@ function buildStandaloneHtml_(doc, items, st, payments) {
         'ยอดรวมก่อนภาษี: ' + thaiMoney_(doc.subTotal) + ' บาท<br>' +
         'ภาษีมูลค่าเพิ่ม: ' + thaiMoney_(doc.vatAmount) + ' บาท<br>' +
         '<b style="font-size:14px;color:' + th.main + '">รวมทั้งสิ้น: ' + thaiMoney_(doc.grandTotal) + ' บาท</b></td></tr></table>';
+
+      /* เงื่อนไขท้ายใบวางบิล/ใบส่งของ (IV) — ก่อนช่องลงนาม */
+      if (doc.docType === 'IV') {
+        const cd = parseInt(st.ivClaimDays) || 7;
+        body += '<div style="margin-top:8px;font-size:11px;line-height:1.55;border:1px solid #e2e8f0;border-radius:4px;padding:6px 10px;background:#f8fafc">' +
+          '<div>- ได้รับสินค้าตามรายการในสภาพดี และถูกต้องเรียบร้อยทุกประการ</div>' +
+          '<div>- หากสินค้ามีปัญหาหรือไม่ครบถ้วน กรุณาแจ้งกลับภายใน <b>' + cd + ' วัน</b> นับตั้งแต่วันที่ได้รับสินค้า' +
+          '<br><span style="padding-left:16px">มิฉะนั้นทางร้านจะไม่รับผิดชอบใด ๆ ทั้งสิ้น</span></div>' +
+          '<div style="margin-top:6px;font-weight:bold;text-align:center">ได้รับสินค้าตามรายการครบถ้วนแล้ว</div></div>';
+      }
     }
 
     body += '<div style="margin-top:40px;font-size:12px;text-align:center">';
