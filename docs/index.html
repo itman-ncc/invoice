@@ -28,6 +28,12 @@
         box-shadow: 0 10px 24px rgba(21,128,61,.35); transition: transform .15s, box-shadow .15s;
     }
     .cta:hover { transform: translateY(-2px); box-shadow: 0 14px 30px rgba(21,128,61,.45); }
+    .cta.alt {
+        background: #1e293b; box-shadow: 0 10px 24px rgba(15,23,42,.3);
+        font-size: 16px; padding: 14px 28px;
+    }
+    .cta.alt:hover { box-shadow: 0 14px 30px rgba(15,23,42,.4); }
+    .cta-row { margin-top: 32px; display: flex; flex-wrap: wrap; gap: 14px; justify-content: center; }
     .hint { margin-top: 12px; font-size: 13px; color: #64748b; }
     .hint code { background: #f1f5f9; padding: 2px 8px; border-radius: 6px; font-weight: 700; color: #334155; }
     .grid {
@@ -50,10 +56,15 @@
     <p class="sub">ระบบออกเอกสาร <strong>ใบเสนอราคา (QT) → ใบวางบิล (IV) → บันทึกรับชำระเงิน → ใบเสร็จ/ใบกำกับภาษี (RE)</strong><br>
     ทำงานบน Google Sheets ฐานข้อมูลเรียลไทม์ — พิมพ์ A4 ได้ทันที ไม่ต้องติดตั้งโปรแกรม</p>
 
-    <a class="cta" href="https://script.google.com/macros/s/AKfycbxxpLbxy0VEFDA93WoIuZCWsXC-AenXMsUXWNKiOdUR5dHI9Sla8PLBAzP4Ja9nt-Mk/exec" target="_blank" rel="noopener" referrerpolicy="no-referrer">
-        🚀 เข้าใช้งานระบบ
-    </a>
-    <p class="hint" style="margin-top:6px;">💡 ต้องล็อกอินบัญชี Google ก่อน — ถ้าขึ้นหน้า Error ของ Google ให้กดรีเฟรชหน้านั้น 1 ครั้ง</p>
+    <div class="cta-row">
+        <a class="cta" href="app.html">
+            🐙 ใช้งานผ่าน GitHub Pages
+        </a>
+        <a class="cta alt" href="https://script.google.com/macros/s/AKfycbxxpLbxy0VEFDA93WoIuZCWsXC-AenXMsUXWNKiOdUR5dHI9Sla8PLBAzP4Ja9nt-Mk/exec" target="_blank" rel="noopener" referrerpolicy="no-referrer">
+            🚀 เข้าใช้งานระบบ (Google โดยตรง)
+        </a>
+    </div>
+    <p class="hint" style="margin-top:6px;">💡 ต้องล็อกอินบัญชี Google ก่อน — ถ้าหน้าฝังไม่แสดง (เบราว์เซอร์บล็อก cookies) ให้ใช้ปุ่มเปิดโดยตรง</p>
 
     <div class="grid">
         <div class="card"><h3>📝 ใบเสนอราคา</h3><p>สร้าง QT พร้อม CAPTCHA ป้องกันสแปม, แปลงเป็นใบวางบิลได้ในคลิกเดียว, เลขเอกสารรันอัตโนมัติรายปี</p></div>
