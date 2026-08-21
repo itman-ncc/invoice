@@ -711,6 +711,10 @@ function renderPrintPreview(doc) {
     document.getElementById('preview-doc-no-label').innerText = doc.docNo;
     document.getElementById('preview-doc-type-label').innerText = TYPE_LABELS[doc.docType] || doc.docType;
     document.getElementById('preview-item-count-label').innerText = `รายการทั้งหมด: ${(doc.items || []).length} รายการ`;
+    document.getElementById('pdf-export-btn').disabled = !!doc.isSample;
+
+    const sampleBanner = document.getElementById('sample-mode-banner');
+    if (sampleBanner) sampleBanner.classList.toggle('hidden', !doc.isSample);
 
     const badge = document.getElementById('print-preview-date-status');
     if (doc.showDateOnPrint) {
@@ -722,7 +726,10 @@ function renderPrintPreview(doc) {
     }
 
     const st = BOOT.settings;
-    const cus = BOOT.customers.find(c => c.id === doc.cusId) || { name: doc.cusName, address:'-', taxId:'-', phone:'-' };
+    const cus = BOOT.customers.find(c => c.id === doc.cusId)
+        || (doc.isSample
+            ? { name: doc.cusName, address: '99/99 ถนนสุขุมวิท แขวงคลองเตย กรุงเทพฯ 10110', taxId: '0105555000000', phone: '02-123-4567' }
+            : { name: doc.cusName, address: '-', taxId: '-', phone: '-' });
     const dateText = doc.showDateOnPrint ? fmtDateTH(doc.docDate) : '___________';
     const items = doc.items || [];
 
@@ -877,13 +884,52 @@ function renderPrintPreview(doc) {
 
 async function triggerBrowserPrint() {
     if (!currentPreviewDoc) return;
-    try { await gs('apiLogPrint', TOKEN, currentPreviewDoc.docNo, 'PRINT'); } catch (e) {}
+    if (!currentPreviewDoc.isSample) {
+        try { await gs('apiLogPrint', TOKEN, currentPreviewDoc.docNo, 'PRINT'); } catch (e) {}
+    }
     window.print();
 }
 
 async function exportPdfToDrive() {
     if (!currentPreviewDoc) return;
+    if (currentPreviewDoc.isSample) {
+        Swal.fire('โหมดตัวอย่าง', 'เป็นเอกสารสมมติ — เปิดเอกสารจริงก่อนจึงจะ Export PDF ลง Drive ได้', 'info');
+        return;
+    }
     exportSinglePdf(currentPreviewDoc.docNo);
+}
+
+/* พรีวิวตัวอย่างแบบฟอร์ม (ข้อมูลสมมติ ไม่บันทึกลงชีต) */
+function previewSample(type) {
+    const src = (BOOT.products || []).slice(0, 3);
+    const fallback = [
+        { name: 'สินค้า/บริการตัวอย่าง A (ค่าแรงติดตั้ง)', unit: 'ชุด', price: 1500 },
+        { name: 'สินค้า/บริการตัวอย่าง B (วัสดุสิ้นเปลือง)', unit: 'ชิ้น', price: 450 },
+        { name: 'สินค้า/บริการตัวอย่าง C (อะไหล่)', unit: 'กล่อง', price: 120 }
+    ];
+    const list = src.length >= 1 ? src : fallback;
+    const qtys = [2, 5, 10];
+    const items = list.map((p, i) => {
+        const unitPrice = Number(p.price) || 0;
+        const qty = qtys[i % qtys.length];
+        return { prodId: p.id || ('P-' + String(i + 1).padStart(4, '0')), prodName: p.name, unit: p.unit, qty, unitPrice, totalPrice: qty * unitPrice };
+    });
+    const sub = items.reduce((s, it) => s + it.totalPrice, 0);
+    const vat = Math.round(sub * vatRate() * 100) / 100;
+    const doc = {
+        isSample: true,
+        docType: type,
+        docNo: type + '26-XXXX',
+        docDate: todayISO(), showDateOnPrint: true,
+        cusId: '__sample__', cusName: 'บริษัท ลูกค้าตัวอย่าง จำกัด',
+        subject: 'ตัวอย่างรายการสำหรับพรีวิวแบบพิมพ์ A4',
+        sendDays: 30, confirmDays: 30, refDocNo: '',
+        subTotal: sub, vatAmount: vat, grandTotal: sub + vat,
+        status: 'Active', notes: 'นี่คือเอกสารตัวอย่าง (ข้อมูลสมมติทุกช่อง)',
+        items
+    };
+    switchTab('print-preview');
+    renderPrintPreview(doc);
 }
 
 async function exportSinglePdf(docNo) {

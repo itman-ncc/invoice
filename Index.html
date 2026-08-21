@@ -369,9 +369,21 @@
                 </div>
             </div>
 
+            <div class="bg-white p-4 rounded-xl shadow-sm border border-stone-200 flex flex-wrap items-center gap-2">
+                <span class="text-sm font-bold text-slate-700 mr-1">👁️ ดูตัวอย่างแบบฟอร์ม:</span>
+                <button onclick="previewSample('QT')" class="px-4 py-2 text-xs font-bold rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 transition">📝 ตัวอย่างใบเสนอราคา</button>
+                <button onclick="previewSample('IV')" class="px-4 py-2 text-xs font-bold rounded-lg bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 transition">📑 ตัวอย่างใบวางบิล</button>
+                <button onclick="previewSample('RE')" class="px-4 py-2 text-xs font-bold rounded-lg bg-purple-50 text-purple-700 border border-purple-200 hover:bg-purple-100 transition">🧾 ตัวอย่างใบเสร็จ/ใบกำกับภาษี</button>
+                <span class="text-[11px] text-slate-400 ml-auto">(ข้อมูลสมมติ — ไม่บันทึกลงชีต)</span>
+            </div>
+
             <div class="bg-amber-50 border border-amber-200 p-3 rounded-lg text-xs text-amber-800 flex items-center justify-between">
                 <span>เอกสาร: <strong id="preview-doc-no-label">-</strong> (<span id="preview-doc-type-label">-</span>)</span>
                 <span class="font-mono" id="preview-item-count-label">0 รายการ</span>
+            </div>
+
+            <div id="sample-mode-banner" class="hidden bg-purple-50 border border-purple-300 p-3 rounded-lg text-xs text-purple-800 font-bold">
+                👁️ โหมดตัวอย่างแบบฟอร์ม — ข้อมูลทั้งหมดเป็นสมมติ ไม่บันทึกลงชีต (Export PDF ใช้ได้เฉพาะเอกสารจริง)
             </div>
 
             <div id="a4-render-area" class="flex flex-col items-center"></div>
