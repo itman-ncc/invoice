@@ -9,8 +9,8 @@
 
 | รายการ | URL |
 |---|---|
-| Google Sheet (ฐานข้อมูล) | https://docs.google.com/spreadsheets/d/1Nf7ud48rwtGbEmOecxXhh3YyraC_kteEXFh4Ec-8NP8/edit |
-| Apps Script Editor | https://script.google.com/u/0/home/projects/1dpY9d0ixY4ze_NYJPdx7hHKFMBDhJZQ5Vq9WskTfdHYkk7fRr-DvVXh-/edit |
+| Google Sheet (ฐานข้อมูล) | https://docs.google.com/spreadsheets/d/1Nf7ud48rwtGbEmOecxXhh3YyraC_kteEXFh4Ec-8NP8/copy |
+| Apps Script Editor | - |
 | Web App | ดูไฟล์ `.deployment-id` → `https://script.google.com/macros/s/<id>/exec` |
 
 **Login เริ่มต้น:** `admin` / `1234` (Admin) หรือ `staff` / `1234` (Staff)
