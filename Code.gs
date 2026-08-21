@@ -1180,7 +1180,7 @@ function buildStandaloneHtml_(doc, items, st) {
   const lp = getLastPrint_(doc.docNo);
   if (lp) stampParts.push('จัดพิมพ์ล่าสุด: ' + lp.by + ' ' + fmtDotTH_(new Date(String(lp.at).replace(' ', 'T'))));
   else stampParts.push('จัดพิมพ์ล่าสุด: -');
-  const printStamp = fmtDotTH_(new Date()) + ' | ' + stampParts.join(' / ');
+  const printStamp = stampParts.join(' / ');
 
   /* ธีมสีตามประเภทเอกสาร — เอกสารสีทุกฉบับ (QT เขียว / IV-RE น้ำเงิน / RC ม่วง) */
   const THEMES = {

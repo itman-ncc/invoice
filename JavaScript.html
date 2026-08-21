@@ -69,12 +69,21 @@ function vatRate() {
 /* ============================================================
  * INIT & SESSION
  * ============================================================ */
-window.addEventListener('DOMContentLoaded', async () => {
+let _initDone = false;
+function initApp() {
+    if (_initDone) return;
+    _initDone = true;
     generateCaptcha();
     if (TOKEN && USER) {
-        try { await loadBootstrap(); enterApp(); return; } catch (e) { /* token หมดอายุ */ }
+        loadBootstrap().then(() => enterApp()).catch(() => { /* token หมดอายุ */ });
     }
-});
+}
+/* GAS sandbox บางครั้ง inject สคริปต์หลัง DOMContentLoaded ผ่านไปแล้ว — เช็ค readyState ด้วย */
+if (document.readyState === 'loading') {
+    window.addEventListener('DOMContentLoaded', initApp);
+} else {
+    initApp();
+}
 
 async function loadBootstrap() {
     BOOT = await gs('apiGetBootstrap', TOKEN);
@@ -137,8 +146,11 @@ function generateCaptcha() {
 
 async function handleLoginSubmit(event) {
     event.preventDefault();
-    const answer = parseInt(document.getElementById('captcha-answer').value);
-    if (answer !== captchaNum1 + captchaNum2) {
+    /* กันกรณี CAPTCHA ยังไม่ถูกสุ่ม (โหลดสคริปต์ชิดเวลา) */
+    if (!captchaNum1 && !captchaNum2) generateCaptcha();
+    const raw = String(document.getElementById('captcha-answer').value || '').trim();
+    const answer = parseInt(raw, 10);
+    if (isNaN(answer) || answer !== captchaNum1 + captchaNum2) {
         Swal.fire('CAPTCHA ไม่ถูกต้อง', 'กรุณาคำนวณผลบวกให้ถูกต้อง', 'error');
         generateCaptcha();
         return;
@@ -883,7 +895,7 @@ function renderPrintPreview(doc) {
     } else {
         stampParts.push('จัดพิมพ์ล่าสุด: ' + (USER.fullName || USER.name || '-') + ' (' + fmtDotTH(new Date()) + ')');
     }
-    const printStamp = fmtDotTH(new Date()) + ' | ' + stampParts.join(' / ');
+    const printStamp = stampParts.join(' / ');
 
     const container = document.getElementById('a4-render-area');
     container.innerHTML = '';
@@ -1056,32 +1068,49 @@ async function triggerBrowserPrint() {
         try { await gs('apiLogPrint', TOKEN, currentPreviewDoc.docNo, 'PRINT'); } catch (e) {}
     }
 
-    /* เปิดหน้าต่างแยกที่มีเฉพาะเอกสาร A4 → ไม่ติดปัญหาหน้าว่าง/โดน header บัง
-     * ใช้ได้ทั้งเปิดตรงและฝังใน iframe (GitHub Pages) */
+    /* พิมพ์ผ่าน hidden iframe ที่มีเฉพาะเอกสาร A4
+     * → ไม่โดน popup blocker / ไม่ติด header หน้าหลัก / ใช้ได้ทั้งเปิดตรงและฝัง iframe */
     const area = document.getElementById('a4-render-area');
-    const w = window.open('', '_blank', 'width=920,height=1050');
-    if (!w) {
-        Swal.fire('ไม่สามารถเปิดหน้าต่างพิมพ์ได้', 'เบราว์เซอร์บล็อก Pop-up — กรุณาอนุญาต Pop-up สำหรับไซต์นี้แล้วลองอีกครั้ง', 'warning');
-        return;
-    }
+    /* คัดลอก CSS ทั้งหมดจากหน้าปัจจุบัน (รวม Tailwind ที่ generate แล้ว) */
     const styleTags = Array.from(document.querySelectorAll('style')).map(s => '<style>' + s.textContent + '</style>').join('\n');
-    w.document.open();
-    w.document.write('<!DOCTYPE html><html lang="th"><head><meta charset="UTF-8"><title>' + esc(currentPreviewDoc.docNo || 'document') + '</title>'
-        + '<script src="https://cdn.tailwindcss.com"><\/script>'
+    const html = '<!DOCTYPE html><html lang="th"><head><meta charset="UTF-8"><title>' + esc(currentPreviewDoc.docNo || 'document') + '</title>'
         + '<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&display=swap" rel="stylesheet">'
         + styleTags
-        + '</head><body style="background:#ffffff">' + area.innerHTML + '</body></html>');
-    w.document.close();
+        + '</head><body style="margin:0;background:#ffffff">' + area.innerHTML + '</body></html>';
 
-    let printed = false;
-    const doPrint = () => { if (printed) return; printed = true; try { w.focus(); w.print(); } catch (e) {} };
-    w.addEventListener('load', () => {
-        /* รอโลโก้/รูปภาพโหลดครบก่อนสั่งพิมพ์ */
-        const imgs = Array.from(w.document.images || []);
-        Promise.all(imgs.map(im => im.complete ? null : new Promise(res => { im.onload = im.onerror = res; })))
-            .then(() => setTimeout(doPrint, 400));
-    });
-    setTimeout(doPrint, 3500);
+    try {
+        let f = document.getElementById('print-frame');
+        if (f) f.remove();
+        f = document.createElement('iframe');
+        f.id = 'print-frame';
+        f.setAttribute('aria-hidden', 'true');
+        f.style.cssText = 'position:fixed;left:-10000px;top:0;width:210mm;height:297mm;border:0;';
+        document.body.appendChild(f);
+
+        let printed = false;
+        const doPrint = () => {
+            if (printed) return;
+            printed = true;
+            try { f.contentWindow.focus(); f.contentWindow.print(); } catch (e) {}
+        };
+        f.onload = () => {
+            const win = f.contentWindow;
+            const imgs = Array.from((win.document && win.document.images) || []);
+            const fontsReady = (win.document.fonts && win.document.fonts.ready) ? win.document.fonts.ready : Promise.resolve();
+            fontsReady.then(() => Promise.all(imgs.map(im => im.complete ? null : new Promise(res => { im.onload = im.onerror = res; }))))
+                .then(() => setTimeout(doPrint, 350));
+        };
+        const d = f.contentWindow.document;
+        d.open();
+        d.write(html);
+        d.close();
+        setTimeout(doPrint, 4000);
+    } catch (e) {
+        /* fallback: พิมพ์หน้าหลักโดยซ่อนทุกอย่างยกเว้นกรอบเอกสาร */
+        document.body.classList.add('printing');
+        window.print();
+        setTimeout(() => document.body.classList.remove('printing'), 1000);
+    }
 }
 
 async function exportPdfToDrive() {
