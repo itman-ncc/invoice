@@ -673,7 +673,13 @@
     </footer>
 
     <div id="top-progress" class="top-progress"></div>
-    <div id="busy-pill">⏳ กำลังดำเนินการ...</div>
+    <div id="busy-pill">
+        <div class="busy-box">
+            <div class="busy-spinner"></div>
+            <div class="busy-text">⏳ กำลังดำเนินการ...</div>
+            <div class="busy-sub">กรุณารอสักครู่ ระบบกำลังประมวลผล</div>
+        </div>
+    </div>
 
     <?!= include('JavaScript'); ?>
 </body>

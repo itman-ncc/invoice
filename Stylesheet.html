@@ -129,28 +129,39 @@ body.gs-busy .top-progress { display: block; }
     0% { background-position: 0% 0; }
     100% { background-position: -200% 0; }
 }
+/* Overlay สถานะการทำงาน — ใหญ่ กลางจอ เห็นชัด */
 #busy-pill {
     display: none;
-    position: fixed; bottom: 18px; right: 18px; z-index: 9999;
-    pointer-events: none;
-    align-items: center; gap: 8px;
-    padding: 8px 14px;
-    background: #1e293b; color: #fff;
-    font-size: 12px; font-weight: 600;
-    border-radius: 999px;
-    box-shadow: 0 6px 20px rgba(0,0,0,.35);
-    animation: gp-pop .25s ease-out;
+    position: fixed; inset: 0; z-index: 9999;
+    align-items: center; justify-content: center;
+    background: rgba(15, 23, 42, .50);
 }
 body.gs-busy #busy-pill { display: flex; }
-#busy-pill::before {
-    content: '';
-    width: 12px; height: 12px; flex: none;
-    border: 2px solid rgba(255,255,255,.35);
-    border-top-color: #fff; border-radius: 50%;
-    animation: gp-spin .7s linear infinite;
+#busy-pill .busy-box {
+    background: #ffffff;
+    border-radius: 20px;
+    padding: 30px 46px;
+    box-shadow: 0 24px 60px rgba(0,0,0,.35);
+    display: flex; flex-direction: column; align-items: center; gap: 12px;
+    animation: gp-pop .25s ease-out;
+}
+#busy-pill .busy-spinner {
+    width: 56px; height: 56px; flex: none;
+    border: 7px solid #d1fae5;
+    border-top-color: #059669;
+    border-radius: 50%;
+    animation: gp-spin .75s linear infinite;
+}
+#busy-pill .busy-text {
+    font-size: 18px; font-weight: 700; color: #1e293b;
+    font-family: 'Sarabun', sans-serif;
+}
+#busy-pill .busy-sub {
+    font-size: 13px; color: #64748b;
+    font-family: 'Sarabun', sans-serif;
 }
 @keyframes gp-spin { to { transform: rotate(360deg); } }
-@keyframes gp-pop { from { transform: translateY(8px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes gp-pop { from { transform: scale(.92); opacity: 0; } to { transform: none; opacity: 1; } }
 
 /* ปุ่มที่เพิ่งถูกคลิก → pulse + spinner มุมขวา */
 button.btn-flash {
@@ -173,6 +184,6 @@ button.btn-flash::after {
     100% { transform: scale(1); filter: brightness(1); }
 }
 @media (prefers-reduced-motion: reduce) {
-    .top-progress, button.btn-flash, button.btn-flash::after, #busy-pill::before { animation: none !important; }
+    .top-progress, button.btn-flash, button.btn-flash::after, #busy-pill .busy-spinner { animation: none !important; }
 }
 </style>
