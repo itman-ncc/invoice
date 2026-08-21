@@ -552,6 +552,7 @@ function initCkeditor() {
     ensureCkeScript(() => {
         try {
             CKEDITOR.replace('form-qt-declaration', {
+                versionCheck: false,
                 language: 'th',
                 height: 150,
                 removePlugins: 'elementspath',
