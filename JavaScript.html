@@ -118,7 +118,9 @@ function initApp() {
     _initDone = true;
     generateCaptcha();
     if (TOKEN && USER) {
-        loadBootstrap().then(() => enterApp()).catch(() => { /* token หมดอายุ */ });
+        loadBootstrap().then(() => enterApp()).catch(() => { /* token หมดอายุ */ prefillRememberedLogin(); });
+    } else {
+        prefillRememberedLogin();
     }
 }
 /* GAS sandbox บางครั้ง inject สคริปต์หลัง DOMContentLoaded ผ่านไปแล้ว — เช็ค readyState ด้วย */
@@ -156,6 +158,7 @@ function forceLogout(msg) {
     document.getElementById('app-header').classList.add('hidden');
     document.getElementById('login-modal').classList.remove('hidden');
     generateCaptcha();
+    prefillRememberedLogin();
     if (msg) Swal.fire('ออกจากระบบ', msg, 'info');
 }
 
@@ -181,6 +184,44 @@ function renderAll() {
  * LOGIN / CAPTCHA
  * ============================================================ */
 let captchaNum1 = 0, captchaNum2 = 0;
+
+/* ---------------- localStorage helpers (กัน sandbox บางสภาพแวดล้อม) ---------------- */
+function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+function lsSet(k, v) { try { localStorage.setItem(k, v); return true; } catch (e) { return false; } }
+function lsDel(k) { try { localStorage.removeItem(k); } catch (e) {} }
+
+/* 👁️ แสดง/ซ่อนรหัสผ่านหน้าล็อกอิน */
+function toggleLoginPassword() {
+    const inp = document.getElementById('login-password');
+    const btn = inp.nextElementSibling;
+    const show = inp.type === 'password';
+    inp.type = show ? 'text' : 'password';
+    if (btn) btn.innerText = show ? '🙈' : '👁️';
+}
+
+/* เติมชื่อผู้ใช้/รหัสผ่านที่เคยจดจำไว้ */
+function prefillRememberedLogin() {
+    const box = document.getElementById('login-remember');
+    if (!box) return;
+    const raw = lsGet('sb_remember');
+    if (!raw) return;
+    try {
+        const saved = JSON.parse(decodeURIComponent(escape(atob(raw))));
+        document.getElementById('login-username').value = saved.u || '';
+        document.getElementById('login-password').value = saved.p || '';
+        box.checked = true;
+    } catch (e) { lsDel('sb_remember'); }
+}
+
+function saveRememberedLogin() {
+    const box = document.getElementById('login-remember');
+    if (!box || !box.checked) { lsDel('sb_remember'); return; }
+    const payload = {
+        u: document.getElementById('login-username').value.trim(),
+        p: document.getElementById('login-password').value
+    };
+    lsSet('sb_remember', btoa(unescape(encodeURIComponent(JSON.stringify(payload)))));
+}
 
 function generateCaptcha() {
     captchaNum1 = Math.floor(Math.random() * 10) + 1;
@@ -210,6 +251,7 @@ async function handleLoginSubmit(event) {
         USER = res.user;
         sessionStorage.setItem('sb_token', TOKEN);
         sessionStorage.setItem('sb_user', JSON.stringify(USER));
+        saveRememberedLogin();
         await loadBootstrap();
         enterApp();
         Toast.fire({ icon:'success', title:'เข้าสู่ระบบสำเร็จ — ยินดีต้อนรับ ' + (USER.fullName || USER.name) });
