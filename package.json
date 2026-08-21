@@ -4,11 +4,12 @@
   "description": "Smart Billing WebApp — Google Apps Script + Google Sheets (clasp workflow)",
   "scripts": {
     "pull": "clasp pull",
-    "push": "clasp push",
+    "push": "clasp push -f",
     "watch": "clasp push --watch",
     "deploy": "node scripts/deploy.js",
-    "open": "clasp open --webapp",
-    "editor": "clasp open",
-    "logs": "clasp logs --watch"
+    "sync": "node scripts/git-sync.js",
+    "open": "clasp open-web-app",
+    "editor": "clasp open-script",
+    "logs": "clasp logs"
   }
 }

@@ -54,6 +54,14 @@ try {
   } else {
     console.log('⚠️  ไม่พบ deployment id — ตรวจสอบด้วยคำสั่ง: npx clasp deployments');
   }
+
+  // Step 3: auto-sync ขึ้น GitHub (git error ไม่ทำให้ deploy ล้ม)
+  try {
+    console.log('🔀 Auto-sync to GitHub...');
+    run('node scripts/git-sync.js "Deploy: ' + desc + '"');
+  } catch (e2) {
+    console.error('⚠️  Git sync failed (แต่ deploy สำเร็จแล้ว): ' + e2.message);
+  }
 } catch (e) {
   console.error('❌ Deploy failed:', e.message);
   process.exit(1);
