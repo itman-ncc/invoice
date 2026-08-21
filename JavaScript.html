@@ -484,29 +484,43 @@ function startCashSale() {
 
 /* ============================================================
  * CKEDITOR — คำชี้แจงการยื่นเสนอราคา (QT)
+ * ใช้เวอร์ชันโอเพนซอร์สฟรี (GPL) จาก github.com/ckeditor/ckeditor4
+ * ผ่าน npm mirror: jsdelivr ← หลัก / unpkg ← สำรองอัตโนมัติ
  * ============================================================ */
+function ensureCkeScript(onReady) {
+    if (window.CKEDITOR) { onReady(); return; }
+    const urls = [
+        'https://cdn.jsdelivr.net/npm/ckeditor4@4.25.2/ckeditor.js',
+        'https://unpkg.com/ckeditor4@4.25.2/ckeditor.js'
+    ];
+    let i = 0;
+    (function next() {
+        if (i >= urls.length || window.CKEDITOR) { if (window.CKEDITOR) onReady(); return; }
+        const s = document.createElement('script');
+        s.src = urls[i++];
+        s.onload = onReady;
+        s.onerror = next;
+        document.head.appendChild(s);
+    })();
+}
+
 function initCkeditor() {
-    if (!window.CKEDITOR || CKEDITOR.instances['form-qt-declaration']) return;
-    try {
-        CKEDITOR.replace('form-qt-declaration', {
-            language: 'th',
-            height: 150,
-            removePlugins: 'elementspath',
-            resize_enabled: false,
-            toolbar: [
-                ['Bold', 'Italic', 'Underline', '-','NumberedList', 'BulletedList', '-', 'Outdent', 'Indent', '-', 'Undo', 'Redo']
-            ]
-        });
-        /* กัน CDN โหลดค้าง/สคริปต์ถูกบล็อก → ตรวจซ้ำ 1 ครั้ง แล้วใช้ textarea ปกติ */
-        setTimeout(() => {
-            if (!CKEDITOR.instances['form-qt-declaration']) {
-                try { CKEDITOR.replace('form-qt-declaration', { language: 'th', height: 150, removePlugins: 'elementspath', resize_enabled: false }); }
-                catch (e) { console.warn('CKEditor fallback → plain textarea', e); }
-            }
-        }, 1500);
-    } catch (e) {
-        console.warn('initCkeditor ล้มเหลว ใช้ textarea ปกติแทน', e);
-    }
+    if (CKEDITOR.instances['form-qt-declaration']) return;
+    ensureCkeScript(() => {
+        try {
+            CKEDITOR.replace('form-qt-declaration', {
+                language: 'th',
+                height: 150,
+                removePlugins: 'elementspath',
+                resize_enabled: false,
+                toolbar: [
+                    ['Bold', 'Italic', 'Underline', '-','NumberedList', 'BulletedList', '-', 'Outdent', 'Indent', '-', 'Undo', 'Redo']
+                ]
+            });
+        } catch (e) {
+            console.warn('initCkeditor ล้มเหลว ใช้ textarea ปกติแทน', e);
+        }
+    });
 }
 
 /* เนื้อหาค่าเริ่มต้น — เติมข้อมูลร้านจากชีต Settings ให้อัตโนมัติ */
