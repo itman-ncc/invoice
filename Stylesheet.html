@@ -48,6 +48,14 @@
     }
     .a4-items-table thead tr:first-child th { border-top: none; }
 
+    /* คำชี้แจงการยื่นเสนอราคา — Tailwind preflight ลบ list-style ทิ้ง ต้องคืนค่าเอง */
+    .a4-declaration ol { list-style: decimal outside; margin: 0 0 4px 0; padding-left: 22px; }
+    .a4-declaration ul { list-style: disc outside; margin: 0 0 4px 0; padding-left: 22px; }
+    .a4-declaration li { display: list-item; margin: 0 0 4px 0; padding-left: 2px; }
+    .a4-declaration li:last-child { margin-bottom: 0; }
+    .a4-declaration p { margin: 0 0 6px 0; }
+    .a4-declaration p:last-child { margin-bottom: 0; }
+
     @media (max-width: 900px) {
         .a4-page {
             width: 100%;
