@@ -891,8 +891,10 @@ function apiSaveDocument(token, doc) {
     if (doc.docType === 'RC') {
       const method = PAY_METHODS[doc.payMethod] ? doc.payMethod : 'CASH';
       const detail = String(doc.payDetail || '').trim();
-      if ((method === 'CHEQUE' || method === 'OTHER') && !detail) {
-        throw new Error(method === 'CHEQUE' ? 'กรุณาระบุเลขที่เช็ค/ธนาคาร' : 'กรุณาระบุรายละเอียดวิธีชำระเงิน');
+      if (method !== 'CASH' && !detail) {
+        throw new Error(method === 'TRANSFER' ? 'กรุณาระบุข้อมูลการโอน (ธนาคาร/เลขบัญชี/เลขอ้างอิง)'
+          : method === 'CHEQUE' ? 'กรุณาระบุเลขที่เช็ค/ธนาคาร'
+          : 'กรุณาระบุรายละเอียดวิธีชำระเงิน');
       }
       payId = recordPayment_(s.userName, doc.docNo, doc.docDate, doc.grandTotal, method, detail);
     }
@@ -1027,8 +1029,11 @@ function apiAddPayment(token, docNo, payDate, amount, method, detail) {
   if (!(amount > 0)) throw new Error('จำนวนเงินต้องมากกว่า 0');
   if (!PAY_METHODS[method]) throw new Error('กรุณาเลือกวิธีชำระเงิน');
   detail = String(detail || '').trim();
-  if ((method === 'CHEQUE' || method === 'OTHER') && !detail) {
-    throw new Error(method === 'CHEQUE' ? 'กรุณาระบุเลขที่เช็ค/ธนาคาร' : 'กรุณาระบุรายละเอียดวิธีชำระเงิน');
+  /* เงินโอน/เช็ค/อื่นๆ → บังคับระบุข้อมูลที่เกี่ยวข้อง */
+  if (method !== 'CASH' && !detail) {
+    throw new Error(method === 'TRANSFER' ? 'กรุณาระบุข้อมูลการโอน (ธนาคาร/เลขบัญชี/เลขอ้างอิง)'
+      : method === 'CHEQUE' ? 'กรุณาระบุเลขที่เช็ค/ธนาคาร'
+      : 'กรุณาระบุรายละเอียดวิธีชำระเงิน');
   }
   const grandTotal = Number(vals[12]) || 0;
   const paidBefore = getPaidTotal_(docNo);

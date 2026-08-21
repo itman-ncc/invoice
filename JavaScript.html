@@ -55,6 +55,12 @@ function todayISO() {
     const d = new Date();
     return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
 }
+/* รูปแบบ วัน.เดือน.ปี(พ.ศ.) เวลา — ใช้ในตราท้ายเอกสาร */
+function fmtDotTH(d) {
+    const dt = d instanceof Date ? d : new Date();
+    const p = n => String(n).padStart(2, '0');
+    return p(dt.getDate()) + '.' + p(dt.getMonth() + 1) + '.' + (dt.getFullYear() + 543) + ' ' + p(dt.getHours()) + ':' + p(dt.getMinutes());
+}
 function vatRate() {
     const r = parseFloat(BOOT && BOOT.settings.vatRate);
     return isNaN(r) ? 0.07 : r;
@@ -521,8 +527,9 @@ async function saveAndPreviewDoc() {
     const validItems = payload.items.filter(it => it.prodName && it.prodName.trim() !== '' && it.qty > 0);
     if (validItems.length === 0) { Swal.fire('ข้อมูลไม่ครบ', 'ต้องมีรายการสินค้าอย่างน้อย 1 รายการ (ชื่อ + จำนวน > 0)', 'warning'); return; }
     if (payload.items.some(it => !it.prodName.trim())) { Swal.fire('ข้อมูลไม่ครบ', 'มีแถวรายการที่ยังไม่ได้ระบุชื่อสินค้า', 'warning'); return; }
-    if (payload.docType === 'RC' && (payload.payMethod === 'CHEQUE' || payload.payMethod === 'OTHER') && !payload.payDetail) {
-        Swal.fire('ข้อมูลไม่ครบ', payload.payMethod === 'CHEQUE' ? 'กรุณาระบุเลขที่เช็ค/ธนาคาร' : 'กรุณาระบุรายละเอียดวิธีชำระเงิน', 'warning');
+    if (payload.docType === 'RC' && payload.payMethod !== 'CASH' && !payload.payDetail) {
+        Swal.fire('ข้อมูลไม่ครบ', payload.payMethod === 'TRANSFER' ? 'กรุณาระบุข้อมูลการโอน (ธนาคาร/เลขบัญชี/เลขอ้างอิง)'
+            : payload.payMethod === 'CHEQUE' ? 'กรุณาระบุเลขที่เช็ค/ธนาคาร' : 'กรุณาระบุรายละเอียดวิธีชำระเงิน', 'warning');
         return;
     }
 
@@ -730,7 +737,7 @@ async function promptAddPayment(ivDocNo) {
                 <label>จำนวนเงิน (บาท)<input id="pay-amount" type="number" min="0" step="0.01" value="${due.toFixed(2)}" style="${inputStyle}"></label>
             </div>
             <label>วิธีชำระเงิน
-                <select id="pay-method" onchange="document.getElementById('pay-detail-wrap').style.display=(this.value==='CHEQUE'||this.value==='OTHER')?'block':'none'" style="${inputStyle}">
+                <select id="pay-method" onchange="document.getElementById('pay-detail-wrap').style.display=this.value!=='CASH'?'block':'none'" style="${inputStyle}">
                     <option value="CASH">เงินสด</option>
                     <option value="TRANSFER">เงินโอน</option>
                     <option value="CHEQUE">เช็ค</option>
@@ -738,7 +745,7 @@ async function promptAddPayment(ivDocNo) {
                 </select>
             </label>
             <div id="pay-detail-wrap" style="display:none">
-                <label>ระบุเพิ่มเติม (เลขที่เช็ค/ธนาคาร/รายละเอียด)<input id="pay-detail" type="text" style="${inputStyle}"></label>
+                <label>ข้อมูลที่เกี่ยวข้อง * (ธนาคาร/เลขบัญชี/เลขอ้างอิงโอน หรือ เลขที่เช็ค)<input id="pay-detail" type="text" placeholder="เช่น โอน ธ.กสิกรฯ ออมทรัพย์ x1234" style="${inputStyle}"></label>
             </div>
         </div>`,
         showCancelButton: true,
@@ -755,6 +762,11 @@ async function promptAddPayment(ivDocNo) {
     if (!result.isConfirmed) return;
     const v = result.value;
     if (!(v.amount > 0)) { Swal.fire('ข้อมูลไม่ถูกต้อง', 'จำนวนเงินต้องมากกว่า 0', 'warning'); return; }
+    if (v.method !== 'CASH' && !v.detail) {
+        Swal.fire('ข้อมูลไม่ครบ', v.method === 'TRANSFER' ? 'กรุณาระบุข้อมูลการโอน (ธนาคาร/เลขบัญชี/เลขอ้างอิง)'
+            : v.method === 'CHEQUE' ? 'กรุณาระบุเลขที่เช็ค/ธนาคาร' : 'กรุณาระบุรายละเอียดวิธีชำระเงิน', 'warning');
+        return;
+    }
     try {
         const res = await gs('apiAddPayment', TOKEN, ivDocNo, v.payDate, v.amount, v.method, v.detail);
         await loadBootstrapSilent();
@@ -853,6 +865,14 @@ function renderPrintPreview(doc) {
     for (let i = 0; i < items.length; i += ITEMS_PER_PAGE) pages.push(items.slice(i, i + ITEMS_PER_PAGE));
     if (!pages.length) pages.push([]);
     const totalPages = pages.length;
+
+    /* ตราท้ายเอกสาร: วัน.เดือน.ปี(พ.ศ.).เวลา | ผู้บันทึก/แก้ไข/จัดพิมพ์ */
+    const creatorName = doc.createdByName || doc.createdBy || '';
+    const stampParts = [];
+    if (creatorName) stampParts.push('บันทึก: ' + creatorName);
+    if (doc.updatedByName && doc.updatedByName !== creatorName) stampParts.push('แก้ไข: ' + doc.updatedByName);
+    stampParts.push('จัดพิมพ์: ' + (USER.fullName || USER.name || '-'));
+    const printStamp = fmtDotTH(new Date()) + ' | ' + stampParts.join(' / ');
 
     const container = document.getElementById('a4-render-area');
     container.innerHTML = '';
@@ -1006,7 +1026,8 @@ function renderPrintPreview(doc) {
                 </thead>
                 <tbody class="divide-y divide-slate-200">${rowsHtml}</tbody>
             </table>
-            ${footerHtml}`;
+            ${footerHtml}
+            <div class="mt-2 pt-1 border-t border-slate-200 text-[10px] text-slate-400 font-mono">${esc(printStamp)}</div>`;
         container.appendChild(page);
     });
 }
