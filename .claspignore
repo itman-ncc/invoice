@@ -1,0 +1,8 @@
+scripts/**
+node_modules/**
+backup/**
+README.md
+package.json
+package-lock.json
+.deployment-id
+*.md

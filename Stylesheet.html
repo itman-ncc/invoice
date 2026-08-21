@@ -1,0 +1,78 @@
+<style>
+    body {
+        font-family: 'Sarabun', sans-serif;
+        background-color: #f8f6f0;
+        color: #1e293b;
+    }
+
+    .chart-container {
+        position: relative;
+        width: 100%;
+        max-width: 600px;
+        margin-left: auto;
+        margin-right: auto;
+        height: 300px;
+        max-height: 380px;
+    }
+
+    @media (min-width: 768px) {
+        .chart-container { height: 340px; }
+    }
+
+    /* ---------- A4 Page Simulation ---------- */
+    .a4-page {
+        width: 210mm;
+        min-height: 297mm;
+        padding: 15mm;
+        margin: 10mm auto;
+        background: #ffffff;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+        position: relative;
+        box-sizing: border-box;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+    }
+
+    @media (max-width: 900px) {
+        .a4-page {
+            width: 100%;
+            min-width: 0;
+            padding: 16px;
+            margin: 10px 0;
+            overflow-x: auto;
+        }
+    }
+
+    /* ---------- Print Rules ---------- */
+    @media print {
+        @page { size: A4; margin: 0; }
+        body {
+            background-color: #ffffff !important;
+            color: #000000 !important;
+        }
+        .no-print { display: none !important; }
+        main { padding: 0 !important; max-width: none !important; }
+        .a4-page {
+            box-shadow: none !important;
+            margin: 0 !important;
+            width: 210mm !important;
+            min-height: 297mm !important;
+            page-break-after: always;
+            break-after: page;
+        }
+        .a4-page:last-child {
+            page-break-after: avoid;
+            break-after: avoid;
+        }
+        table { page-break-inside: auto; }
+        tr { page-break-inside: avoid; }
+    }
+
+    /* SweetAlert z-index above header */
+    .swal2-container { z-index: 10000 !important; }
+
+    /* Scrollbar polish for tables on mobile */
+    .overflow-x-auto::-webkit-scrollbar { height: 8px; }
+    .overflow-x-auto::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+</style>

@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <base target="_top">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Billing System</title>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: { extend: { colors: { brand: {
+                50:'#f0fdf4',100:'#dcfce7',600:'#16a34a',700:'#15803d',800:'#166534'
+            }}}}
+        };
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+    <?!= include('Stylesheet'); ?>
+</head>
+<body class="min-h-screen flex flex-col">
+
+    <datalist id="products-search-list"></datalist>
+
+    <!-- ================= LOGIN OVERLAY ================= -->
+    <div id="login-modal" class="fixed inset-0 bg-slate-900/90 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 sm:p-8 space-y-6 border border-slate-200">
+            <div class="text-center space-y-2">
+                <div class="text-4xl">🔐</div>
+                <h2 class="text-2xl font-bold text-slate-800">เข้าสู่ระบบ Smart Billing</h2>
+                <p class="text-xs text-slate-500">ระบบเอกสารการขายออนไลน์ — เชื่อมต่อ Google Sheets</p>
+            </div>
+
+            <form onsubmit="handleLoginSubmit(event)" class="space-y-4">
+                <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">ชื่อผู้ใช้งาน</label>
+                    <input type="text" id="login-username" required autocomplete="username"
+                        class="w-full p-2.5 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">รหัสผ่าน</label>
+                    <input type="password" id="login-password" required autocomplete="current-password"
+                        class="w-full p-2.5 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none">
+                </div>
+
+                <div class="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-2">
+                    <div class="flex items-center justify-between">
+                        <label class="text-xs font-bold text-slate-700">🤖 ตรวจสอบความเป็นมนุษย์:</label>
+                        <button type="button" onclick="generateCaptcha()" class="text-xs text-emerald-700 hover:underline">🔄 สุ่มใหม่</button>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <span id="captcha-question" class="font-mono text-base font-bold bg-amber-100 text-amber-900 px-3 py-1.5 rounded border border-amber-300 min-w-[90px] text-center select-none">-- + -- = ?</span>
+                        <input type="number" id="captcha-answer" placeholder="คำตอบ" required
+                            class="w-full p-2 border border-slate-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-emerald-500 focus:outline-none">
+                    </div>
+                </div>
+
+                <button type="submit" id="login-btn"
+                    class="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-sm transition shadow-md flex items-center justify-center gap-2 disabled:opacity-60">
+                    🚀 เข้าสู่ระบบ
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- ================= HEADER ================= -->
+    <header class="bg-slate-800 text-white shadow-md no-print sticky top-0 z-40 hidden" id="app-header">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center justify-between h-16">
+                <div class="flex items-center space-x-3">
+                    <span class="text-2xl">🧾</span>
+                    <div>
+                        <h1 class="font-bold text-lg leading-tight">Smart Billing System</h1>
+                        <p class="text-xs text-slate-300">ระบบเอกสารการขาย &amp; รายงานสถิติ</p>
+                    </div>
+                </div>
+
+                <nav class="hidden lg:flex space-x-1">
+                    <button onclick="switchTab('dashboard')"   id="nav-dashboard"   class="nav-btn px-3 py-2 rounded-md text-sm font-medium hover:bg-slate-700 transition">📊 แดชบอร์ด</button>
+                    <button onclick="switchTab('create-doc')"  id="nav-create-doc"  class="nav-btn px-3 py-2 rounded-md text-sm font-medium hover:bg-slate-700 transition">📝 ออกเอกสาร</button>
+                    <button onclick="switchTab('doc-list')"    id="nav-doc-list"    class="nav-btn px-3 py-2 rounded-md text-sm font-medium hover:bg-slate-700 transition">📁 รายการเอกสาร</button>
+                    <button onclick="switchTab('print-preview')" id="nav-print-preview" class="nav-btn px-3 py-2 rounded-md text-sm font-medium hover:bg-slate-700 transition">🖨️ พรีวิวพิมพ์</button>
+                    <button onclick="switchTab('master-db')"   id="nav-master-db"   class="nav-btn px-3 py-2 rounded-md text-sm font-medium hover:bg-slate-700 transition">📦 ข้อมูลหลัก</button>
+                    <button onclick="switchTab('settings')"    id="nav-settings"    class="nav-btn px-3 py-2 rounded-md text-sm font-medium hover:bg-slate-700 transition">⚙️ ตั้งค่า & Log</button>
+                </nav>
+
+                <div class="hidden sm:flex items-center gap-3">
+                    <span class="text-xs text-slate-300 bg-slate-700 px-2.5 py-1 rounded-full border border-slate-600">👤 <strong id="logged-user-name" class="text-emerald-400">-</strong> <span id="logged-user-role" class="text-slate-400"></span></span>
+                    <button onclick="handleLogout()" class="text-xs bg-rose-600/80 hover:bg-rose-600 text-white px-2.5 py-1 rounded transition">ออกจากระบบ</button>
+                </div>
+
+                <div class="lg:hidden flex items-center gap-2">
+                    <button onclick="handleLogout()" class="sm:hidden text-xs bg-rose-600 hover:bg-rose-700 text-white px-2 py-1 rounded">ออก</button>
+                    <button onclick="toggleMobileMenu()" class="p-2 rounded-md text-slate-300 hover:text-white hover:bg-slate-700">☰</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="mobile-menu" class="hidden lg:hidden bg-slate-900 border-t border-slate-700 px-2 pt-2 pb-3 space-y-1">
+            <button onclick="switchTab('dashboard')"      class="block w-full text-left px-3 py-2 rounded-md text-base text-white hover:bg-slate-800">📊 แดชบอร์ด &amp; รายงาน</button>
+            <button onclick="switchTab('create-doc')"     class="block w-full text-left px-3 py-2 rounded-md text-base text-white hover:bg-slate-800">📝 ออกเอกสารใหม่</button>
+            <button onclick="switchTab('doc-list')"       class="block w-full text-left px-3 py-2 rounded-md text-base text-white hover:bg-slate-800">📁 รายการเอกสาร</button>
+            <button onclick="switchTab('print-preview')"  class="block w-full text-left px-3 py-2 rounded-md text-base text-white hover:bg-slate-800">🖨️ ตัวอย่างพิมพ์ A4</button>
+            <button onclick="switchTab('master-db')"      class="block w-full text-left px-3 py-2 rounded-md text-base text-white hover:bg-slate-800">📦 จัดการข้อมูลหลัก</button>
+            <button onclick="switchTab('settings')"       class="block w-full text-left px-3 py-2 rounded-md text-base text-white hover:bg-slate-800">⚙️ ตั้งค่า &amp; Audit Log</button>
+        </div>
+    </header>
+
+    <main class="flex-grow max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 no-print">
+
+        <!-- ================= TAB: DASHBOARD ================= -->
+        <section id="tab-dashboard" class="tab-content space-y-6">
+            <div class="bg-white p-5 rounded-xl shadow-sm border border-stone-200">
+                <h2 class="text-xl font-bold text-slate-800">📊 ภาพรวมระบบ &amp; รายงานสถิติการขาย</h2>
+                <p class="text-sm text-slate-600 mt-1">สรุปยอดขาย สถานะเอกสาร และสินค้าที่ต้องสั่งซื้อ (อัปเดตจาก Google Sheets แบบเรียลไทม์)</p>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div class="bg-white p-5 rounded-xl shadow-sm border-l-4 border-emerald-600 border-t border-r border-b border-stone-200">
+                    <div class="text-xs font-semibold text-slate-500 uppercase tracking-wider">ยอดขายเดือนนี้</div>
+                    <div class="text-2xl font-bold text-slate-800 mt-1" id="kpi-total-sales">฿0</div>
+                    <div class="text-xs font-medium mt-1" id="kpi-growth">-</div>
+                </div>
+                <div class="bg-white p-5 rounded-xl shadow-sm border-l-4 border-amber-500 border-t border-r border-b border-stone-200">
+                    <div class="text-xs font-semibold text-slate-500 uppercase tracking-wider">ใบเสนอราคารอวางบิล</div>
+                    <div class="text-2xl font-bold text-slate-800 mt-1" id="kpi-pending-qt">0 ฉบับ</div>
+                    <div class="text-xs text-amber-600 font-medium mt-1" id="kpi-pending-qt-value">มูลค่า ฿0</div>
+                </div>
+                <div class="bg-white p-5 rounded-xl shadow-sm border-l-4 border-blue-600 border-t border-r border-b border-stone-200">
+                    <div class="text-xs font-semibold text-slate-500 uppercase tracking-wider">ใบวางบิลรอเก็บเงิน</div>
+                    <div class="text-2xl font-bold text-slate-800 mt-1" id="kpi-pending-inv">0 ฉบับ</div>
+                    <div class="text-xs text-blue-600 font-medium mt-1" id="kpi-pending-inv-value">มูลค่า ฿0</div>
+                </div>
+                <div class="bg-white p-5 rounded-xl shadow-sm border-l-4 border-rose-600 border-t border-r border-b border-stone-200">
+                    <div class="text-xs font-semibold text-slate-500 uppercase tracking-wider">สินค้าต้องสั่งซื้อเพิ่ม</div>
+                    <div class="text-2xl font-bold text-rose-600 mt-1" id="kpi-low-stock">0 รายการ</div>
+                    <div class="text-xs text-rose-500 font-medium mt-1">ต่ำกว่าจุดสั่งซื้อ</div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div class="bg-white p-5 rounded-xl shadow-sm border border-stone-200 flex flex-col">
+                    <h3 class="text-base font-bold text-slate-800 mb-3">📈 ยอดขายรายเดือน (ปีปัจจุบัน)</h3>
+                    <div class="chart-container"><canvas id="chartSalesTrend"></canvas></div>
+                </div>
+                <div class="bg-white p-5 rounded-xl shadow-sm border border-stone-200 flex flex-col">
+                    <h3 class="text-base font-bold text-slate-800 mb-3">📊 สัดส่วนสถานะเอกสาร</h3>
+                    <div class="chart-container"><canvas id="chartDocStatus"></canvas></div>
+                </div>
+            </div>
+
+            <!-- Report Range Filter -->
+            <div class="bg-white p-5 rounded-xl shadow-sm border border-stone-200 space-y-4">
+                <div class="flex flex-wrap items-end gap-3">
+                    <h3 class="text-base font-bold text-slate-800 w-full sm:w-auto">🧾 รายงานสรุปตามช่วงวันที่</h3>
+                    <div>
+                        <label class="block text-xs text-slate-500 mb-1">จากวันที่</label>
+                        <input type="date" id="report-from" class="p-2 border border-slate-300 rounded-lg text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-slate-500 mb-1">ถึงวันที่</label>
+                        <input type="date" id="report-to" class="p-2 border border-slate-300 rounded-lg text-sm">
+                    </div>
+                    <button onclick="runReport()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium">🔍 ดูรายงาน</button>
+                </div>
+                <div id="report-result" class="hidden space-y-4"></div>
+            </div>
+
+            <div class="bg-white p-5 rounded-xl shadow-sm border border-stone-200">
+                <h3 class="text-base font-bold text-slate-800 mb-3">⚠️ สินค้าที่ต้องสั่งซื้อเติมสต๊อก (Stock Alert)</h3>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm text-left text-slate-600">
+                        <thead class="text-xs uppercase bg-slate-100 text-slate-700">
+                            <tr>
+                                <th class="p-3">รหัสสินค้า</th><th class="p-3">ชื่อสินค้า</th>
+                                <th class="p-3 text-center">คงเหลือ</th><th class="p-3 text-center">จุดสั่งซื้อ</th><th class="p-3 text-center">สถานะ</th>
+                            </tr>
+                        </thead>
+                        <tbody id="low-stock-table-body" class="divide-y divide-slate-100"></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================= TAB: CREATE DOCUMENT ================= -->
+        <section id="tab-create-doc" class="tab-content space-y-6 hidden">
+            <div class="bg-white p-5 rounded-xl shadow-sm border border-stone-200 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                    <h2 class="text-xl font-bold text-slate-800">📝 ระบบออกเอกสารออนไลน์</h2>
+                    <p class="text-sm text-slate-600 mt-1">ใบเสนอราคา / ใบวางบิล-ใบส่งของ / ใบเสร็จ-ใบกำกับภาษี / บิลเงินสด — เลือกได้ว่าจะลงวันที่หรือไม่ลงวันที่</p>
+                </div>
+                <button onclick="openProductModal()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-medium px-4 py-2 rounded-lg text-sm transition self-start md:self-auto shadow-sm">➕ เพิ่มสินค้าใหม่ลง DB</button>
+            </div>
+
+            <div class="bg-white p-6 rounded-xl shadow-sm border border-stone-200 space-y-6">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 pb-6 border-b border-slate-200">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 uppercase mb-1">ประเภทเอกสาร</label>
+                        <select id="form-doc-type" onchange="handleDocTypeChange()"
+                            class="w-full p-2.5 border border-slate-300 rounded-lg text-sm font-bold text-emerald-800 bg-emerald-50/50 focus:ring-2 focus:ring-emerald-500 focus:outline-none">
+                            <option value="QT">ใบเสนอราคา (QT)</option>
+                            <option value="IV">ใบวางบิล / ใบส่งของ (IV)</option>
+                            <option value="RE">ใบเสร็จ / ใบกำกับภาษี (RE)</option>
+                            <option value="RC">บิลเงินสด (RC)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 uppercase mb-1">เลขที่เอกสาร</label>
+                        <input type="text" id="form-doc-no" value="(รันอัตโนมัติเมื่อบันทึก)" readonly
+                            class="w-full p-2.5 bg-slate-100 border border-slate-300 rounded-lg text-sm text-slate-500 font-mono font-bold">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 uppercase mb-1">วันที่เอกสาร (เก็บในฐานข้อมูล)</label>
+                        <input type="date" id="form-doc-date" class="w-full p-2.5 border border-slate-300 rounded-lg text-sm mb-2">
+                        <label class="inline-flex items-center gap-2 cursor-pointer text-xs font-semibold text-emerald-800 bg-emerald-50 p-1.5 rounded border border-emerald-200 w-full">
+                            <input type="checkbox" id="form-doc-show-date" checked class="w-4 h-4 accent-emerald-600">
+                            <span>ลงวันที่บนเอกสาร (ไม่เช็ค = เว้นว่าง)</span>
+                        </label>
+                    </div>
+                </div>
+
+                <div id="quotation-fields-container" class="bg-amber-50/60 p-4 rounded-xl border border-amber-200/80 space-y-3">
+                    <div class="text-xs font-bold text-amber-900">📌 เงื่อนไขเฉพาะใบเสนอราคา</div>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-700 mb-1">เรื่อง (Subject)</label>
+                            <input type="text" id="form-doc-subject" placeholder="ระบุเรื่อง..." class="w-full p-2 border border-slate-300 rounded-lg text-xs">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-700 mb-1">กำหนดส่งมอบ</label>
+                            <div class="flex items-center gap-2">
+                                <input type="number" id="form-doc-send-day" value="30" min="1" class="w-full p-2 border border-slate-300 rounded-lg text-xs font-mono text-center">
+                                <span class="text-xs text-slate-600">วัน</span>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-700 mb-1">กำหนดยืนราคา</label>
+                            <div class="flex items-center gap-2">
+                                <input type="number" id="form-doc-confirm-day" value="30" min="1" class="w-full p-2 border border-slate-300 rounded-lg text-xs font-mono text-center">
+                                <span class="text-xs text-slate-600">วัน</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 pb-6 border-b border-slate-200">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 uppercase mb-1">เรียน / เลือกลูกค้า</label>
+                        <select id="form-customer-select" onchange="handleCustomerSelect()" class="w-full p-2.5 border border-slate-300 rounded-lg text-sm"></select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 uppercase mb-1">ข้อมูลลูกค้า</label>
+                        <textarea id="form-customer-detail" rows="3" readonly class="w-full p-2 bg-slate-50 border border-slate-300 rounded-lg text-xs text-slate-600 leading-relaxed"></textarea>
+                    </div>
+                </div>
+
+                <div>
+                    <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+                        <h3 class="text-sm font-bold text-slate-800">รายการสินค้า / บริการ</h3>
+                        <span class="text-xs text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded border border-emerald-200">🔍 พิมพ์ค้นหาจาก DB หรือพิมพ์รายการใหม่ → บันทึกลงชีตสินค้าได้ทันที</span>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm text-left min-w-[640px]">
+                            <thead class="bg-slate-100 text-slate-700 text-xs uppercase">
+                                <tr>
+                                    <th class="p-3 w-10">#</th>
+                                    <th class="p-3">ค้นหา / ชื่อรายการสินค้า</th>
+                                    <th class="p-3 w-20 text-center">หน่วย</th>
+                                    <th class="p-3 w-24 text-center">จำนวน</th>
+                                    <th class="p-3 w-32 text-right">ราคา/หน่วย</th>
+                                    <th class="p-3 w-32 text-right">ราคารวม</th>
+                                    <th class="p-3 w-16 text-center">ลบ</th>
+                                </tr>
+                            </thead>
+                            <tbody id="document-items-tbody" class="divide-y divide-slate-200"></tbody>
+                        </table>
+                    </div>
+                    <div class="mt-3">
+                        <button onclick="addFormRow(true)" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md text-xs font-semibold border border-slate-300">➕ เพิ่มแถวรายการ</button>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4 border-t border-slate-200">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 uppercase mb-1">หมายเหตุ / เงื่อนไขการชำระเงิน</label>
+                        <textarea id="form-doc-notes" rows="3" placeholder="ระบุหมายเหตุ..." class="w-full p-2.5 border border-slate-300 rounded-lg text-xs"></textarea>
+                    </div>
+                    <div class="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2 text-sm">
+                        <div class="flex justify-between text-slate-600">
+                            <span>ยอดรวมก่อนภาษี:</span><span class="font-mono font-semibold" id="calc-subtotal">฿0.00</span>
+                        </div>
+                        <div class="flex justify-between items-center text-slate-600">
+                            <label class="inline-flex items-center gap-2 cursor-pointer">
+                                <input type="checkbox" id="calc-vat-check" onchange="recalculateFormTotals()" checked class="accent-emerald-600">
+                                <span>ภาษีมูลค่าเพิ่ม (<span id="vat-rate-label">7</span>%):</span>
+                            </label>
+                            <span class="font-mono font-semibold" id="calc-vat-amount">฿0.00</span>
+                        </div>
+                        <div class="flex justify-between text-slate-900 font-bold text-base pt-2 border-t border-slate-300">
+                            <span>รวมทั้งสิ้น:</span><span class="font-mono text-emerald-700 text-lg" id="calc-grand-total">฿0.00</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex flex-wrap gap-3 justify-end pt-4 border-t border-slate-200">
+                    <button onclick="resetDocForm()" class="px-4 py-2 border border-slate-300 rounded-lg text-sm text-slate-600 hover:bg-slate-100">ล้างข้อมูล</button>
+                    <button onclick="saveAndPreviewDoc()" id="save-doc-btn" class="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-lg text-sm shadow-sm disabled:opacity-60">💾 บันทึก &amp; พรีวิว A4</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================= TAB: DOC LIST ================= -->
+        <section id="tab-doc-list" class="tab-content space-y-6 hidden">
+            <div class="bg-white p-5 rounded-xl shadow-sm border border-stone-200">
+                <h2 class="text-xl font-bold text-slate-800">📁 รายการเอกสารทั้งหมด</h2>
+                <p class="text-sm text-slate-600 mt-1">ค้นหา แก้ไข ยกเลิก (พร้อมเหตุผล) แปลง QT→IV พรีวิว/พิมพ์ และส่งออก PDF</p>
+            </div>
+
+            <div class="bg-white p-4 rounded-xl shadow-sm border border-stone-200 flex flex-wrap gap-3 items-center justify-between">
+                <div class="flex flex-wrap gap-2 w-full md:w-auto">
+                    <input type="text" id="filter-search" oninput="renderDocListTable()" placeholder="🔍 เลขที่เอกสาร / ชื่อลูกค้า..."
+                        class="p-2 border border-slate-300 rounded-lg text-sm w-full sm:w-64">
+                    <select id="filter-type" onchange="renderDocListTable()" class="p-2 border border-slate-300 rounded-lg text-sm">
+                        <option value="ALL">ทุกประเภท</option>
+                        <option value="QT">ใบเสนอราคา (QT)</option>
+                        <option value="IV">ใบวางบิล (IV)</option>
+                        <option value="RE">ใบเสร็จ/ภาษี (RE)</option>
+                        <option value="RC">บิลเงินสด (RC)</option>
+                    </select>
+                    <select id="filter-status" onchange="renderDocListTable()" class="p-2 border border-slate-300 rounded-lg text-sm">
+                        <option value="ALL">ทุกสถานะ</option>
+                        <option value="Active">Active</option>
+                        <option value="Billed">Billed (วางบิลแล้ว)</option>
+                        <option value="Cancelled">Cancelled (ยกเลิก)</option>
+                    </select>
+                </div>
+                <button onclick="refreshBootstrap()" class="text-xs px-3 py-2 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-lg">🔄 รีเฟรชข้อมูล</button>
+            </div>
+
+            <div class="bg-white rounded-xl shadow-sm border border-stone-200 overflow-hidden">
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm text-left min-w-[860px]">
+                        <thead class="bg-slate-100 text-slate-700 text-xs uppercase border-b border-slate-200">
+                            <tr>
+                                <th class="p-3">เลขที่</th><th class="p-3">ประเภท</th><th class="p-3">วันที่</th>
+                                <th class="p-3">ลงวันที่?</th><th class="p-3">ลูกค้า</th>
+                                <th class="p-3 text-right">ยอดรวม</th><th class="p-3 text-center">สถานะ</th><th class="p-3 text-center">จัดการ</th>
+                            </tr>
+                        </thead>
+                        <tbody id="doc-list-tbody" class="divide-y divide-slate-100"></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================= TAB: PRINT PREVIEW ================= -->
+        <section id="tab-print-preview" class="tab-content space-y-6 hidden">
+            <div class="bg-white p-5 rounded-xl shadow-sm border border-stone-200 flex flex-wrap items-center justify-between gap-4">
+                <div>
+                    <h2 class="text-xl font-bold text-slate-800">🖨️ ตัวอย่างเอกสาร A4 (Multi-page)</h2>
+                    <p class="text-sm text-slate-600 mt-1">เกิน 20 รายการจะขึ้นหน้าใหม่อัตโนมัติพร้อมเลขหน้า — พิมพ์ได้ไม่จำกัด (มีบันทึก Audit Log ทุกครั้ง)</p>
+                </div>
+                <div class="flex flex-wrap items-center gap-3 bg-slate-50 p-3 rounded-lg border border-slate-200">
+                    <div id="print-preview-date-status" class="text-xs font-semibold px-2.5 py-1 rounded border"></div>
+                    <button onclick="triggerBrowserPrint()" class="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white font-medium text-sm rounded-lg">🖨️ พิมพ์ / Save PDF</button>
+                    <button onclick="exportPdfToDrive()" id="pdf-export-btn" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium text-sm rounded-lg disabled:opacity-60">📄 Export PDF → Drive</button>
+                </div>
+            </div>
+
+            <div class="bg-amber-50 border border-amber-200 p-3 rounded-lg text-xs text-amber-800 flex items-center justify-between">
+                <span>เอกสาร: <strong id="preview-doc-no-label">-</strong> (<span id="preview-doc-type-label">-</span>)</span>
+                <span class="font-mono" id="preview-item-count-label">0 รายการ</span>
+            </div>
+
+            <div id="a4-render-area" class="flex flex-col items-center"></div>
+        </section>
+
+        <!-- ================= TAB: MASTER DB ================= -->
+        <section id="tab-master-db" class="tab-content space-y-6 hidden">
+            <div class="bg-white p-5 rounded-xl shadow-sm border border-stone-200">
+                <h2 class="text-xl font-bold text-slate-800">📦 จัดการฐานข้อมูลหลัก</h2>
+                <p class="text-sm text-slate-600 mt-1">สินค้า / ลูกค้า / ผู้ใช้งาน — เชื่อมตรงกับ Google Sheets</p>
+            </div>
+
+            <div class="flex flex-wrap space-x-2 border-b border-slate-200">
+                <button onclick="switchMasterSubTab('products')"  id="subtab-btn-products"  class="px-4 py-2 text-sm font-bold border-b-2 border-emerald-600 text-emerald-700">สินค้า</button>
+                <button onclick="switchMasterSubTab('customers')" id="subtab-btn-customers" class="px-4 py-2 text-sm font-bold border-b-2 border-transparent text-slate-500">ลูกค้า</button>
+                <button onclick="switchMasterSubTab('users')"     id="subtab-btn-users"     class="px-4 py-2 text-sm font-bold border-b-2 border-transparent text-slate-500">ผู้ใช้งาน</button>
+            </div>
+
+            <div id="subtab-products" class="bg-white rounded-xl shadow-sm border border-stone-200 overflow-hidden">
+                <div class="p-4 border-b border-slate-200 flex justify-between items-center">
+                    <h3 class="font-bold text-slate-800 text-sm">ตารางสินค้า</h3>
+                    <button onclick="openProductModal()" class="bg-emerald-600 text-white px-3 py-1.5 rounded-md text-xs font-medium hover:bg-emerald-700">➕ เพิ่มสินค้า</button>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm text-left min-w-[760px]">
+                        <thead class="bg-slate-100 text-slate-700 text-xs uppercase">
+                            <tr>
+                                <th class="p-3">รหัส</th><th class="p-3">ชื่อสินค้า</th><th class="p-3">หมวด</th><th class="p-3 text-center">หน่วย</th>
+                                <th class="p-3 text-right">ราคา</th><th class="p-3 text-center">คงเหลือ</th><th class="p-3 text-center">Reorder</th>
+                                <th class="p-3 text-center">สถานะ</th><th class="p-3 text-center">จัดการ</th>
+                            </tr>
+                        </thead>
+                        <tbody id="master-products-tbody" class="divide-y divide-slate-100"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div id="subtab-customers" class="bg-white rounded-xl shadow-sm border border-stone-200 overflow-hidden hidden">
+                <div class="p-4 border-b border-slate-200 flex justify-between items-center">
+                    <h3 class="font-bold text-slate-800 text-sm">ตารางลูกค้า</h3>
+                    <button onclick="openCustomerModal()" class="bg-emerald-600 text-white px-3 py-1.5 rounded-md text-xs font-medium hover:bg-emerald-700">➕ เพิ่มลูกค้า</button>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm text-left min-w-[720px]">
+                        <thead class="bg-slate-100 text-slate-700 text-xs uppercase">
+                            <tr>
+                                <th class="p-3">รหัส</th><th class="p-3">ชื่อลูกค้า</th><th class="p-3">ที่อยู่</th>
+                                <th class="p-3">โทรศัพท์</th><th class="p-3">อีเมล</th><th class="p-3">เลขภาษี</th><th class="p-3 text-center">จัดการ</th>
+                            </tr>
+                        </thead>
+                        <tbody id="master-customers-tbody" class="divide-y divide-slate-100"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div id="subtab-users" class="bg-white rounded-xl shadow-sm border border-stone-200 overflow-hidden hidden">
+                <div class="p-4 border-b border-slate-200 flex justify-between items-center">
+                    <h3 class="font-bold text-slate-800 text-sm">ผู้ใช้งานระบบ (เฉพาะ Admin)</h3>
+                    <button onclick="openUserModal()" class="bg-emerald-600 text-white px-3 py-1.5 rounded-md text-xs font-medium hover:bg-emerald-700">➕ เพิ่มผู้ใช้</button>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm text-left min-w-[560px]">
+                        <thead class="bg-slate-100 text-slate-700 text-xs uppercase">
+                            <tr>
+                                <th class="p-3">รหัส</th><th class="p-3">ชื่อผู้ใช้</th><th class="p-3">ระดับ</th>
+                                <th class="p-3 text-center">Active</th><th class="p-3 text-center">จัดการ</th>
+                            </tr>
+                        </thead>
+                        <tbody id="master-users-tbody" class="divide-y divide-slate-100"></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================= TAB: SETTINGS ================= -->
+        <section id="tab-settings" class="tab-content space-y-6 hidden">
+            <div class="bg-white p-5 rounded-xl shadow-sm border border-stone-200">
+                <h2 class="text-xl font-bold text-slate-800">⚙️ ตั้งค่าร้านค้า &amp; Audit Logs</h2>
+                <p class="text-sm text-slate-600 mt-1">ข้อมูลส่วนหัวเอกสาร ผู้ลงนาม และบันทึกการใช้งานทั้งหมด</p>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div class="bg-white p-5 rounded-xl shadow-sm border border-stone-200 space-y-4">
+                    <h3 class="font-bold text-slate-800 text-base pb-2 border-b border-slate-200">🏢 ข้อมูลร้านค้า</h3>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">URL โลโก้</label>
+                        <input type="text" id="setting-logo-url" class="w-full p-2 border border-slate-300 rounded text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">ชื่อร้าน / บริษัท</label>
+                        <input type="text" id="setting-shop-name" class="w-full p-2 border border-slate-300 rounded text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">ที่อยู่</label>
+                        <textarea id="setting-shop-address" rows="2" class="w-full p-2 border border-slate-300 rounded text-sm"></textarea>
+                    </div>
+                    <div class="grid grid-cols-2 gap-2">
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-600 mb-1">โทรศัพท์</label>
+                            <input type="text" id="setting-shop-phone" class="w-full p-2 border border-slate-300 rounded text-sm">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-600 mb-1">เลขภาษีร้าน</label>
+                            <input type="text" id="setting-shop-taxid" class="w-full p-2 border border-slate-300 rounded text-sm">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">อีเมล</label>
+                        <input type="text" id="setting-shop-email" class="w-full p-2 border border-slate-300 rounded text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">ชื่อผู้จัดการ</label>
+                        <input type="text" id="setting-manager-name" class="w-full p-2 border border-slate-300 rounded text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">ผู้มีอำนาจลงนาม</label>
+                        <input type="text" id="setting-signatory-name" class="w-full p-2 border border-slate-300 rounded text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">Google Drive Folder ID (เก็บไฟล์ PDF)</label>
+                        <input type="text" id="setting-pdf-folder-id" placeholder="เว้นว่าง = ใช้โฟลเดอร์ SmartBilling_PDF" class="w-full p-2 border border-slate-300 rounded text-sm font-mono">
+                    </div>
+                    <button onclick="saveShopSettings()" id="save-settings-btn" class="w-full py-2 bg-emerald-600 text-white rounded text-sm font-medium hover:bg-emerald-700">บันทึกการตั้งค่า</button>
+                </div>
+
+                <div class="lg:col-span-2 bg-white p-5 rounded-xl shadow-sm border border-stone-200 space-y-4">
+                    <h3 class="font-bold text-slate-800 text-base pb-2 border-b border-slate-200 flex items-center justify-between">
+                        <span>📜 Audit Logs (บันทึกการใช้งาน / ออกเอกสาร)</span>
+                        <button onclick="refreshBootstrap()" class="text-xs font-normal px-2 py-1 bg-slate-100 border border-slate-300 rounded">🔄</button>
+                    </h3>
+                    <div class="overflow-x-auto max-h-96 overflow-y-auto">
+                        <table class="w-full text-xs text-left">
+                            <thead class="bg-slate-100 text-slate-700 uppercase sticky top-0">
+                                <tr><th class="p-2.5">วัน-เวลา</th><th class="p-2.5">ผู้ใช้</th><th class="p-2.5">Action</th><th class="p-2.5">เอกสาร</th><th class="p-2.5">รายละเอียด</th></tr>
+                            </thead>
+                            <tbody id="audit-log-tbody" class="divide-y divide-slate-100 font-mono"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer class="bg-slate-800 text-slate-400 text-xs py-4 text-center no-print border-t border-slate-700 mt-auto">
+        Smart Billing System © 2026 | Google Apps Script + Google Sheets
+    </footer>
+
+    <?!= include('JavaScript'); ?>
+</body>
+</html>

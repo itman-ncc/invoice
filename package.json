@@ -1,0 +1,14 @@
+{
+  "name": "smart-billing-system",
+  "version": "1.0.0",
+  "description": "Smart Billing WebApp — Google Apps Script + Google Sheets (clasp workflow)",
+  "scripts": {
+    "pull": "clasp pull",
+    "push": "clasp push",
+    "watch": "clasp push --watch",
+    "deploy": "node scripts/deploy.js",
+    "open": "clasp open --webapp",
+    "editor": "clasp open",
+    "logs": "clasp logs --watch"
+  }
+}

@@ -1,0 +1,1196 @@
+<script>
+/* ============================================================
+ * SMART BILLING SYSTEM — Client Logic
+ * ============================================================ */
+
+/* ---------------- STATE ---------------- */
+let TOKEN = sessionStorage.getItem('sb_token') || '';
+let USER = JSON.parse(sessionStorage.getItem('sb_user') || 'null');
+let BOOT = null;
+let formItems = [];
+let editingDocNo = null;
+let currentPreviewDoc = null;
+let salesChart = null;
+let statusChart = null;
+
+const ITEMS_PER_PAGE = 20;
+const THAI_MONTHS = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
+const TYPE_LABELS = { QT:'ใบเสนอราคา', IV:'ใบวางบิล/ใบส่งของ', RE:'ใบเสร็จ/ใบกำกับภาษี', RC:'บิลเงินสด' };
+
+const Toast = Swal.mixin({ toast:true, position:'top-end', showConfirmButton:false, timer:2200, timerProgressBar:true });
+
+/* ---------------- GAS BRIDGE ---------------- */
+function gs(fn, ...args) {
+    return new Promise((resolve, reject) => {
+        google.script.run
+            .withSuccessHandler(res => {
+                if (res && res.ok === false) { reject(new Error(res.message || 'เกิดข้อผิดพลาด')); return; }
+                resolve(res);
+            })
+            .withFailureHandler(err => {
+                const msg = String((err && err.message) || err);
+                if (msg.includes('SESSION_EXPIRED')) forceLogout('หมดเวลาการใช้งาน กรุณาเข้าสู่ระบบใหม่');
+                reject(new Error(msg));
+            })[fn](...args);
+    });
+}
+
+/* ---------------- HELPERS ---------------- */
+function esc(v) {
+    return String(v == null ? '' : v).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+        .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function fmt(n) { return Number(n || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+function fmtShort(n) { return Number(n || 0).toLocaleString('th-TH'); }
+function fmtDateTH(iso) {
+    if (!iso) return '-';
+    const p = String(iso).split('-');
+    return p.length === 3 ? `${p[2]}/${p[1]}/${p[0]}` : iso;
+}
+function todayISO() {
+    const d = new Date();
+    return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+}
+function vatRate() {
+    const r = parseFloat(BOOT && BOOT.settings.vatRate);
+    return isNaN(r) ? 0.07 : r;
+}
+
+/* ============================================================
+ * INIT & SESSION
+ * ============================================================ */
+window.addEventListener('DOMContentLoaded', async () => {
+    generateCaptcha();
+    if (TOKEN && USER) {
+        try { await loadBootstrap(); enterApp(); return; } catch (e) { /* token หมดอายุ */ }
+    }
+});
+
+async function loadBootstrap() {
+    BOOT = await gs('apiGetBootstrap', TOKEN);
+}
+
+function enterApp() {
+    document.getElementById('login-modal').classList.add('hidden');
+    document.getElementById('app-header').classList.remove('hidden');
+    document.getElementById('logged-user-name').innerText = USER.name;
+    document.getElementById('logged-user-role').innerText = '(' + USER.role + ')';
+
+    if (String(USER.role).toLowerCase() !== 'admin') {
+        const btn = document.getElementById('subtab-btn-users');
+        if (btn) btn.classList.add('hidden');
+    }
+
+    initCreateDocForm();
+    renderAll();
+    switchTab('dashboard');
+}
+
+function forceLogout(msg) {
+    try { if (TOKEN) google.script.run.apiLogout(TOKEN); } catch (e) {}
+    sessionStorage.removeItem('sb_token');
+    sessionStorage.removeItem('sb_user');
+    TOKEN = ''; USER = null;
+    document.getElementById('app-header').classList.add('hidden');
+    document.getElementById('login-modal').classList.remove('hidden');
+    generateCaptcha();
+    if (msg) Swal.fire('ออกจากระบบ', msg, 'info');
+}
+
+async function refreshBootstrap(silent) {
+    await loadBootstrap();
+    renderAll();
+    if (!silent) Toast.fire({ icon:'success', title:'รีเฟรชข้อมูลแล้ว' });
+}
+
+function renderAll() {
+    fillSettingsForm();
+    renderCustomerSelect();
+    refreshProductsDatalist();
+    renderDocListTable();
+    renderMasterDB();
+    renderAuditLogs();
+    handleCustomerSelect();
+}
+
+/* ============================================================
+ * LOGIN / CAPTCHA
+ * ============================================================ */
+let captchaNum1 = 0, captchaNum2 = 0;
+
+function generateCaptcha() {
+    captchaNum1 = Math.floor(Math.random() * 10) + 1;
+    captchaNum2 = Math.floor(Math.random() * 10) + 1;
+    document.getElementById('captcha-question').innerText = `${captchaNum1} + ${captchaNum2} = ?`;
+    document.getElementById('captcha-answer').value = '';
+}
+
+async function handleLoginSubmit(event) {
+    event.preventDefault();
+    const answer = parseInt(document.getElementById('captcha-answer').value);
+    if (answer !== captchaNum1 + captchaNum2) {
+        Swal.fire('CAPTCHA ไม่ถูกต้อง', 'กรุณาคำนวณผลบวกให้ถูกต้อง', 'error');
+        generateCaptcha();
+        return;
+    }
+    const btn = document.getElementById('login-btn');
+    btn.disabled = true;
+    try {
+        const res = await gs('apiLogin',
+            document.getElementById('login-username').value.trim(),
+            document.getElementById('login-password').value);
+        TOKEN = res.token;
+        USER = res.user;
+        sessionStorage.setItem('sb_token', TOKEN);
+        sessionStorage.setItem('sb_user', JSON.stringify(USER));
+        await loadBootstrap();
+        enterApp();
+        Toast.fire({ icon:'success', title:'เข้าสู่ระบบสำเร็จ — ยินดีต้อนรับ ' + USER.name });
+    } catch (e) {
+        Swal.fire('เข้าสู่ระบบไม่สำเร็จ', e.message, 'error');
+        generateCaptcha();
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+function handleLogout() { forceLogout(null); }
+
+/* ============================================================
+ * TAB NAVIGATION
+ * ============================================================ */
+function switchTab(tabId) {
+    document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+    document.getElementById('tab-' + tabId).classList.remove('hidden');
+
+    document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('bg-slate-700','text-white','font-bold'));
+    const activeBtn = document.getElementById('nav-' + tabId);
+    if (activeBtn) activeBtn.classList.add('bg-slate-700','text-white','font-bold');
+
+    document.getElementById('mobile-menu').classList.add('hidden');
+
+    if (tabId === 'dashboard') renderDashboard();
+    if (tabId === 'doc-list') renderDocListTable();
+    if (tabId === 'master-db') renderMasterDB();
+    if (tabId === 'settings') renderAuditLogs();
+    if (tabId === 'print-preview' && !currentPreviewDoc && BOOT && BOOT.documents.length) {
+        renderPrintPreview(BOOT.documents[0]);
+    }
+}
+
+function toggleMobileMenu() {
+    document.getElementById('mobile-menu').classList.toggle('hidden');
+}
+
+function switchMasterSubTab(sub) {
+    ['products','customers','users'].forEach(k => {
+        document.getElementById('subtab-' + k).classList.add('hidden');
+        const b = document.getElementById('subtab-btn-' + k);
+        b.className = b.className.replace('border-emerald-600 text-emerald-700','border-transparent text-slate-500');
+    });
+    document.getElementById('subtab-' + sub).classList.remove('hidden');
+    const btn = document.getElementById('subtab-btn-' + sub);
+    btn.className = btn.className.replace('border-transparent text-slate-500','border-emerald-600 text-emerald-700');
+}
+
+/* ============================================================
+ * DASHBOARD
+ * ============================================================ */
+async function renderDashboard() {
+    let d;
+    try { d = await gs('apiGetDashboard', TOKEN); }
+    catch (e) { console.error(e); return; }
+
+    document.getElementById('kpi-total-sales').innerText = '฿' + fmtShort(d.kpi.salesThisMonth);
+    const growthEl = document.getElementById('kpi-growth');
+    if (d.kpi.salesPrevMonth > 0) {
+        const g = ((d.kpi.salesThisMonth - d.kpi.salesPrevMonth) / d.kpi.salesPrevMonth * 100);
+        growthEl.innerText = (g >= 0 ? '↑ +' : '↓ ') + g.toFixed(1) + '% จากเดือนก่อน';
+        growthEl.className = 'text-xs font-medium mt-1 ' + (g >= 0 ? 'text-emerald-600' : 'text-rose-600');
+    } else { growthEl.innerText = '-'; }
+
+    document.getElementById('kpi-pending-qt').innerText = d.kpi.pendingQT.count + ' ฉบับ';
+    document.getElementById('kpi-pending-qt-value').innerText = 'มูลค่า ฿' + fmtShort(d.kpi.pendingQT.value);
+    document.getElementById('kpi-pending-inv').innerText = d.kpi.pendingIV.count + ' ฉบับ';
+    document.getElementById('kpi-pending-inv-value').innerText = 'มูลค่า ฿' + fmtShort(d.kpi.pendingIV.value);
+    document.getElementById('kpi-low-stock').innerText = d.kpi.lowStockCount + ' รายการ';
+
+    const lowTbody = document.getElementById('low-stock-table-body');
+    lowTbody.innerHTML = d.lowStock.length === 0
+        ? '<tr><td colspan="5" class="p-4 text-center text-slate-400">สินค้าทุกรายการมีจำนวนเพียงพอ</td></tr>'
+        : d.lowStock.map(p => `
+            <tr class="hover:bg-slate-50">
+                <td class="p-3 font-mono text-xs font-bold text-slate-700">${esc(p.id)}</td>
+                <td class="p-3 font-medium text-slate-800">${esc(p.name)}</td>
+                <td class="p-3 text-center font-bold text-rose-600 font-mono">${p.remainingQty} ${esc(p.unit)}</td>
+                <td class="p-3 text-center text-slate-500 font-mono">${p.reorderPoint}</td>
+                <td class="p-3 text-center"><span class="px-2 py-0.5 text-xs rounded-full bg-rose-100 text-rose-700 font-semibold">${esc(p.status)}</span></td>
+            </tr>`).join('');
+
+    const year = new Date().getFullYear();
+    const ctxS = document.getElementById('chartSalesTrend').getContext('2d');
+    if (salesChart) salesChart.destroy();
+    salesChart = new Chart(ctxS, {
+        type: 'line',
+        data: {
+            labels: THAI_MONTHS,
+            datasets: [{
+                label: 'ยอดขาย (บาท)',
+                data: d.monthlySales,
+                borderColor: '#15803d',
+                backgroundColor: 'rgba(21,128,61,0.1)',
+                fill: true, tension: 0.3, borderWidth: 2
+            }]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { display: false },
+                title: { display: true, text: 'ปี ' + year } },
+            scales: { y: { ticks: { callback: v => '฿' + Number(v).toLocaleString() } } }
+        }
+    });
+
+    const ctxD = document.getElementById('chartDocStatus').getContext('2d');
+    if (statusChart) statusChart.destroy();
+    statusChart = new Chart(ctxD, {
+        type: 'doughnut',
+        data: {
+            labels: ['ใบเสนอราคา Active', 'ใบวางบิลรอเก็บเงิน', 'เสร็จสมบูรณ์', 'ยกเลิก'],
+            datasets: [{
+                data: [d.docStatus.qtActive, d.docStatus.ivPending, d.docStatus.completed, d.docStatus.cancelled],
+                backgroundColor: ['#f59e0b', '#2563eb', '#16a34a', '#e11d48']
+            }]
+        },
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
+    });
+}
+
+async function runReport() {
+    const from = document.getElementById('report-from').value;
+    const to = document.getElementById('report-to').value;
+    if (!from || !to) { Swal.fire('กรอกช่วงวันที่ก่อน', 'กรุณาระบุวันที่เริ่มต้นและสิ้นสุด', 'warning'); return; }
+    if (from > to) { Swal.fire('ช่วงวันที่ไม่ถูกต้อง', 'วันเริ่มต้นต้องไม่เกินวันสิ้นสุด', 'warning'); return; }
+
+    const box = document.getElementById('report-result');
+    box.classList.remove('hidden');
+    box.innerHTML = '<div class="text-center text-slate-400 py-6">กำลังโหลดรายงาน...</div>';
+    try {
+        const r = await gs('apiGetReport', TOKEN, from, to);
+        const typeRows = Object.keys(r.byType).map(t => `
+            <tr>
+                <td class="p-3 font-bold">${TYPE_LABELS[t] || t}</td>
+                <td class="p-3 text-center font-mono">${r.byType[t].count}</td>
+                <td class="p-3 text-right font-mono">฿${fmt(r.byType[t].subtotal)}</td>
+                <td class="p-3 text-right font-mono">฿${fmt(r.byType[t].vat)}</td>
+                <td class="p-3 text-right font-mono font-bold">฿${fmt(r.byType[t].grand)}</td>
+            </tr>`).join('');
+
+        const prodRows = r.topProducts.length === 0
+            ? '<tr><td colspan="4" class="p-4 text-center text-slate-400">ไม่มีข้อมูล</td></tr>'
+            : r.topProducts.map((p, i) => `
+            <tr>
+                <td class="p-3 text-center font-mono">${i + 1}</td>
+                <td class="p-3">${esc(p.prodName)} <span class="text-xs text-slate-400">(${esc(p.prodId)})</span></td>
+                <td class="p-3 text-center font-mono">${fmtShort(p.qty)}</td>
+                <td class="p-3 text-right font-mono font-bold">฿${fmt(p.amount)}</td>
+            </tr>`).join('');
+
+        box.innerHTML = `
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div class="bg-emerald-50 border border-emerald-200 rounded-lg p-4">
+                    <div class="text-xs text-emerald-700 font-semibold">ยอดรวมทั้งหมด (${r.count} เอกสาร)</div>
+                    <div class="text-xl font-bold text-emerald-800">฿${fmt(r.totalGrand)}</div>
+                </div>
+                <div class="sm:col-span-2 bg-slate-50 border border-slate-200 rounded-lg p-4 text-xs text-slate-600">
+                    ช่วงวันที่: <strong>${fmtDateTH(from)} — ${fmtDateTH(to)}</strong> (ไม่รวมเอกสารที่ยกเลิก)
+                </div>
+            </div>
+            <div class="overflow-x-auto"><table class="w-full text-sm min-w-[560px]">
+                <thead class="bg-slate-100 text-xs uppercase text-slate-700"><tr>
+                    <th class="p-3">ประเภท</th><th class="p-3 text-center">จำนวน</th>
+                    <th class="p-3 text-right">ก่อนภาษี</th><th class="p-3 text-right">VAT</th><th class="p-3 text-right">รวม</th>
+                </tr></thead>
+                <tbody class="divide-y divide-slate-100">${typeRows || '<tr><td colspan="5" class="p-4 text-center text-slate-400">ไม่มีเอกสารในช่วงนี้</td></tr>'}</tbody>
+            </table></div>
+            <h4 class="font-bold text-sm text-slate-800 pt-2">🏆 10 สินค้าขายดี (ตามมูลค่า)</h4>
+            <div class="overflow-x-auto"><table class="w-full text-sm min-w-[520px]">
+                <thead class="bg-slate-100 text-xs uppercase text-slate-700"><tr>
+                    <th class="p-3 w-12">#</th><th class="p-3">สินค้า</th><th class="p-3 text-center">จำนวนรวม</th><th class="p-3 text-right">มูลค่า</th>
+                </tr></thead>
+                <tbody class="divide-y divide-slate-100">${prodRows}</tbody>
+            </table></div>`;
+    } catch (e) {
+        box.innerHTML = '<div class="text-center text-rose-600 py-4">' + esc(e.message) + '</div>';
+    }
+}
+
+/* ============================================================
+ * CREATE DOCUMENT FORM
+ * ============================================================ */
+function initCreateDocForm() {
+    document.getElementById('form-doc-date').value = todayISO();
+    document.getElementById('vat-rate-label').innerText = Math.round(vatRate() * 100);
+    handleDocTypeChange();
+    formItems = [];
+    addFormRow(false);
+}
+
+function renderCustomerSelect() {
+    const sel = document.getElementById('form-customer-select');
+    const cur = sel.value;
+    sel.innerHTML = BOOT.customers.map(c =>
+        `<option value="${esc(c.id)}">${esc(c.name)} (${esc(c.id)})</option>`).join('');
+    if (cur) sel.value = cur;
+    handleCustomerSelect();
+}
+
+function handleCustomerSelect() {
+    const cus = BOOT.customers.find(c => c.id === document.getElementById('form-customer-select').value);
+    document.getElementById('form-customer-detail').value = cus
+        ? `ชื่อ: ${cus.name}\nที่อยู่: ${cus.address}\nโทร: ${cus.phone} | อีเมล: ${cus.email}\nเลขภาษี: ${cus.taxId}`
+        : '';
+}
+
+function handleDocTypeChange() {
+    const isQT = document.getElementById('form-doc-type').value === 'QT';
+    document.getElementById('quotation-fields-container').classList.toggle('hidden', !isQT);
+    if (!editingDocNo) {
+        document.getElementById('form-doc-no').value = '(รันอัตโนมัติเมื่อบันทึก)';
+    }
+}
+
+function refreshProductsDatalist() {
+    document.getElementById('products-search-list').innerHTML =
+        BOOT.products.map(p => `<option value="${esc(p.name)}">[${esc(p.id)}] ฿${fmtShort(p.price)}/${esc(p.unit)}</option>`).join('');
+}
+
+function addFormRow(render) {
+    formItems.push({ prodId:'', prodName:'', unit:'', qty:1, unitPrice:0, totalPrice:0, isCustom:false });
+    if (render !== false) renderFormItemRows();
+}
+
+function removeFormRow(i) {
+    if (formItems.length <= 1) { Swal.fire('ลบไม่ได้', 'ต้องมีรายการอย่างน้อย 1 แถว', 'warning'); return; }
+    formItems.splice(i, 1);
+    renderFormItemRows();
+}
+
+function findProductByName(name) {
+    const q = String(name || '').trim().toLowerCase();
+    if (!q) return null;
+    return BOOT.products.find(p => p.name.trim().toLowerCase() === q) || null;
+}
+
+function onProductType(i, val) {
+    const item = formItems[i];
+    item.prodName = val;
+    const p = findProductByName(val);
+    if (p) {
+        item.prodId = p.id; item.unitPrice = p.price; item.unit = p.unit; item.isCustom = false;
+        const priceEl = document.getElementById('item-price-' + i);
+        const unitEl = document.getElementById('item-unit-' + i);
+        if (priceEl) priceEl.value = p.price;
+        if (unitEl) unitEl.value = p.unit;
+    } else {
+        item.prodId = 'CUSTOM'; item.isCustom = val.trim() !== '';
+    }
+    updateRowTotal(i);
+}
+
+function onProductChange(i, val) { onProductType(i, val); }
+
+function onQtyChange(i, val) {
+    formItems[i].qty = Math.max(parseInt(val) || 0, 0);
+    updateRowTotal(i);
+    recalculateFormTotals();
+}
+
+function onPriceChange(i, val) {
+    formItems[i].unitPrice = parseFloat(val) || 0;
+    updateRowTotal(i);
+    recalculateFormTotals();
+}
+
+function onUnitChange(i, val) { formItems[i].unit = val; }
+
+function updateRowTotal(i) {
+    const it = formItems[i];
+    it.totalPrice = (Number(it.qty) || 0) * (Number(it.unitPrice) || 0);
+    const el = document.getElementById('item-total-' + i);
+    if (el) el.innerText = '฿' + fmt(it.totalPrice);
+    recalculateFormTotals();
+}
+
+function renderFormItemRows() {
+    const tbody = document.getElementById('document-items-tbody');
+    tbody.innerHTML = formItems.map((it, i) => `
+        <tr class="hover:bg-slate-50">
+            <td class="p-3 text-center text-xs text-slate-500 font-mono">${i + 1}</td>
+            <td class="p-3">
+                <input type="text" id="item-name-${i}" list="products-search-list"
+                    value="${esc(it.prodName)}"
+                    oninput="onProductType(${i}, this.value)"
+                    onchange="onProductChange(${i}, this.value)"
+                    placeholder="พิมพ์เพื่อค้นหาสินค้า หรือพิมพ์ชื่อใหม่..."
+                    class="w-full p-2 border ${it.isCustom ? 'border-amber-400 bg-amber-50/40' : 'border-slate-300'} rounded text-xs">
+                ${it.isCustom ? `
+                <div class="flex items-center justify-between gap-1 mt-1 text-[11px] bg-amber-50 px-1.5 py-1 rounded border border-amber-200">
+                    <span class="text-amber-800 font-medium">⚠️ สินค้าใหม่ (ไม่มีใน DB)</span>
+                    <button type="button" onclick="quickSaveItemToDB(${i})" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-2 py-0.5 rounded text-[10px]">➕ บันทึกลงชีตสินค้า</button>
+                </div>` : ''}
+            </td>
+            <td class="p-3">
+                <input type="text" id="item-unit-${i}" value="${esc(it.unit)}" onchange="onUnitChange(${i}, this.value)"
+                    placeholder="-" class="w-16 p-1.5 border border-slate-300 rounded text-center text-xs">
+            </td>
+            <td class="p-3 text-center">
+                <input type="number" id="item-qty-${i}" min="0" value="${it.qty}" onchange="onQtyChange(${i}, this.value)"
+                    class="w-20 p-1.5 border border-slate-300 rounded text-center text-xs font-mono">
+            </td>
+            <td class="p-3 text-right">
+                <input type="number" id="item-price-${i}" min="0" step="0.01" value="${it.unitPrice}" onchange="onPriceChange(${i}, this.value)"
+                    class="w-28 p-1.5 border border-slate-300 rounded text-right text-xs font-mono">
+            </td>
+            <td class="p-3 text-right font-mono font-semibold text-slate-800" id="item-total-${i}">฿${fmt(it.totalPrice)}</td>
+            <td class="p-3 text-center">
+                <button onclick="removeFormRow(${i})" class="text-rose-500 hover:text-rose-700 font-bold text-xs">✕</button>
+            </td>
+        </tr>`).join('');
+    recalculateFormTotals();
+}
+
+function recalculateFormTotals() {
+    const subtotal = formItems.reduce((a, it) => a + (Number(it.totalPrice) || 0), 0);
+    const hasVat = document.getElementById('calc-vat-check').checked;
+    const vat = hasVat ? subtotal * vatRate() : 0;
+    document.getElementById('calc-subtotal').innerText = '฿' + fmt(subtotal);
+    document.getElementById('calc-vat-amount').innerText = '฿' + fmt(vat);
+    document.getElementById('calc-grand-total').innerText = '฿' + fmt(subtotal + vat);
+}
+
+function collectDocPayload() {
+    const type = document.getElementById('form-doc-type').value;
+    const cusId = document.getElementById('form-customer-select').value;
+    const cus = BOOT.customers.find(c => c.id === cusId);
+    formItems.forEach((it, i) => {
+        it.prodName = document.getElementById('item-name-' + i)?.value ?? it.prodName;
+        it.qty = Number(document.getElementById('item-qty-' + i)?.value ?? it.qty) || 0;
+        it.unitPrice = Number(document.getElementById('item-price-' + i)?.value ?? it.unitPrice) || 0;
+        it.totalPrice = it.qty * it.unitPrice;
+    });
+    return {
+        docNo: editingDocNo || '',
+        docType: type,
+        docDate: document.getElementById('form-doc-date').value || todayISO(),
+        showDateOnPrint: document.getElementById('form-doc-show-date').checked,
+        cusId: cusId,
+        cusName: cus ? cus.name : '',
+        subject: document.getElementById('form-doc-subject').value,
+        sendDays: parseInt(document.getElementById('form-doc-send-day').value) || 30,
+        confirmDays: parseInt(document.getElementById('form-doc-confirm-day').value) || 30,
+        notes: document.getElementById('form-doc-notes').value,
+        vatEnabled: document.getElementById('calc-vat-check').checked,
+        items: JSON.parse(JSON.stringify(formItems))
+    };
+}
+
+async function saveAndPreviewDoc() {
+    const payload = collectDocPayload();
+
+    if (!payload.cusId) { Swal.fire('ข้อมูลไม่ครบ', 'กรุณาเลือกลูกค้า', 'warning'); return; }
+    const validItems = payload.items.filter(it => it.prodName && it.prodName.trim() !== '' && it.qty > 0);
+    if (validItems.length === 0) { Swal.fire('ข้อมูลไม่ครบ', 'ต้องมีรายการสินค้าอย่างน้อย 1 รายการ (ชื่อ + จำนวน > 0)', 'warning'); return; }
+    if (payload.items.some(it => !it.prodName.trim())) { Swal.fire('ข้อมูลไม่ครบ', 'มีแถวรายการที่ยังไม่ได้ระบุชื่อสินค้า', 'warning'); return; }
+
+    const btn = document.getElementById('save-doc-btn');
+    btn.disabled = true;
+    try {
+        const res = await gs('apiSaveDocument', TOKEN, payload);
+        editingDocNo = null;
+        document.getElementById('form-doc-no').value = res.doc.docNo;
+        currentPreviewDoc = res.doc;
+
+        const idx = BOOT.documents.findIndex(d => d.docNo === res.doc.docNo);
+        if (idx >= 0) BOOT.documents[idx] = res.doc; else BOOT.documents.unshift(res.doc);
+
+        logLocal(res.doc.docNo);
+        const result = await Swal.fire({
+            icon: 'success',
+            title: 'บันทึกเอกสารสำเร็จ',
+            text: `เลขที่ ${res.doc.docNo} — ยอดรวม ฿${fmt(res.doc.grandTotal)}`,
+            showCancelButton: true,
+            confirmButtonText: '🖨️ เปิดพรีวิว A4',
+            cancelButtonText: 'ไปหน้ารายการ'
+        });
+        if (result.isConfirmed) { renderPrintPreview(res.doc); switchTab('print-preview'); }
+        else { renderDocListTable(); switchTab('doc-list'); }
+    } catch (e) {
+        Swal.fire('บันทึกไม่สำเร็จ', e.message, 'error');
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+function logLocal(docNo) { console.log('[SmartBilling] saved:', docNo); }
+
+function resetDocForm() {
+    editingDocNo = null;
+    document.getElementById('form-doc-type').value = 'QT';
+    document.getElementById('form-doc-date').value = todayISO();
+    document.getElementById('form-doc-show-date').checked = true;
+    document.getElementById('form-doc-subject').value = '';
+    document.getElementById('form-doc-send-day').value = 30;
+    document.getElementById('form-doc-confirm-day').value = 30;
+    document.getElementById('form-doc-notes').value = '';
+    document.getElementById('calc-vat-check').checked = true;
+    handleDocTypeChange();
+    formItems = [];
+    addFormRow(false);
+    renderFormItemRows();
+}
+
+function editDocument(docNo) {
+    const doc = BOOT.documents.find(d => d.docNo === docNo);
+    if (!doc) return;
+    editingDocNo = doc.docNo;
+    document.getElementById('form-doc-type').value = doc.docType;
+    document.getElementById('form-doc-date').value = doc.docDate;
+    document.getElementById('form-doc-show-date').checked = !!doc.showDateOnPrint;
+    document.getElementById('form-doc-subject').value = doc.subject || '';
+    document.getElementById('form-doc-send-day').value = doc.sendDays || 30;
+    document.getElementById('form-doc-confirm-day').value = doc.confirmDays || 30;
+    document.getElementById('form-doc-notes').value = doc.notes || '';
+    document.getElementById('calc-vat-check').checked = doc.vatAmount > 0;
+    document.getElementById('form-doc-no').value = 'แก้ไข: ' + doc.docNo;
+    const sel = document.getElementById('form-customer-select');
+    renderCustomerSelect();
+    sel.value = doc.cusId;
+    handleCustomerSelect();
+    handleDocTypeChange();
+    formItems = (doc.items || []).map(it => ({
+        prodId: it.prodId, prodName: it.prodName, unit: it.unit || '',
+        qty: it.qty, unitPrice: it.unitPrice, totalPrice: it.totalPrice,
+        isCustom: it.prodId === 'CUSTOM' || !findProductByName(it.prodName)
+    }));
+    renderFormItemRows();
+    switchTab('create-doc');
+    Toast.fire({ icon:'info', title:'แก้ไขเอกสาร ' + doc.docNo + ' — บันทึกทับฉบับเดิม' });
+}
+
+/* ============================================================
+ * QUICK ADD PRODUCT (จากแถวสินค้าใหม่ในฟอร์ม)
+ * ============================================================ */
+function quickSaveItemToDB(i) {
+    openProductModal({
+        prefillName: formItems[i].prodName,
+        prefillPrice: formItems[i].unitPrice,
+        rowIndex: i
+    });
+}
+
+/* ============================================================
+ * DOC LIST
+ * ============================================================ */
+function renderDocListTable() {
+    const tbody = document.getElementById('doc-list-tbody');
+    if (!BOOT) return;
+    const search = (document.getElementById('filter-search').value || '').toLowerCase();
+    const typeF = document.getElementById('filter-type').value;
+    const statusF = document.getElementById('filter-status').value;
+
+    const filtered = BOOT.documents.filter(d => {
+        const mSearch = d.docNo.toLowerCase().includes(search) || (d.cusName || '').toLowerCase().includes(search);
+        const mType = typeF === 'ALL' || d.docType === typeF;
+        const mStatus = statusF === 'ALL' || d.status === statusF;
+        return mSearch && mType && mStatus;
+    });
+
+    if (!filtered.length) {
+        tbody.innerHTML = '<tr><td colspan="8" class="p-4 text-center text-slate-400">ไม่พบเอกสาร</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = filtered.map(d => {
+        const statusBadge = d.status === 'Active'
+            ? '<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800">Active</span>'
+            : d.status === 'Billed'
+            ? '<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-800">Billed</span>'
+            : `<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-rose-100 text-rose-800" title="${esc(d.cancelReason)}">Cancelled</span>`;
+
+        const dateBadge = d.showDateOnPrint
+            ? '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700">ลงวันที่</span>'
+            : '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800">ไม่ลงวันที่</span>';
+
+        const typeBadge = `<span class="font-bold px-2 py-0.5 rounded border ${
+            d.docType === 'QT' ? 'text-amber-800 bg-amber-50 border-amber-200' :
+            d.docType === 'IV' ? 'text-blue-800 bg-blue-50 border-blue-200' :
+            'text-slate-700 bg-slate-100 border-slate-200'}">${TYPE_LABELS[d.docType] || d.docType}</span>`;
+
+        return `
+        <tr class="hover:bg-slate-50">
+            <td class="p-3 font-mono font-bold text-slate-800 text-xs">${esc(d.docNo)}</td>
+            <td class="p-3 text-xs">${typeBadge}</td>
+            <td class="p-3 text-xs font-mono">${fmtDateTH(d.docDate)}</td>
+            <td class="p-3 text-xs">${dateBadge}</td>
+            <td class="p-3 text-xs font-medium">${esc(d.cusName)}</td>
+            <td class="p-3 text-right font-mono font-bold text-xs">฿${fmt(d.grandTotal)}</td>
+            <td class="p-3 text-center">${statusBadge}</td>
+            <td class="p-3 text-center whitespace-nowrap space-x-1">
+                <button onclick="viewDocPreview('${esc(d.docNo)}')" class="text-xs font-bold text-slate-600 hover:text-emerald-600" title="พรีวิว/พิมพ์">🖨️</button>
+                ${d.status === 'Active' ? `<button onclick="editDocument('${esc(d.docNo)}')" class="text-xs font-bold text-blue-600 hover:underline" title="แก้ไข">✏️</button>` : ''}
+                ${d.docType === 'QT' && d.status === 'Active' ? `<button onclick="convertQtToBilling('${esc(d.docNo)}')" class="text-xs font-bold text-indigo-600 hover:underline" title="สร้างใบวางบิล">➡️IV</button>` : ''}
+                ${d.status !== 'Cancelled' ? `<button onclick="cancelDocumentPrompt('${esc(d.docNo)}')" class="text-xs font-bold text-rose-500 hover:text-rose-700" title="ยกเลิก">✕</button>` : ''}
+                <button onclick="exportSinglePdf('${esc(d.docNo)}')" class="text-xs font-bold text-purple-600 hover:underline" title="Export PDF">📄</button>
+            </td>
+        </tr>`;
+    }).join('');
+}
+
+function viewDocPreview(docNo) {
+    const doc = BOOT.documents.find(d => d.docNo === docNo);
+    if (doc) { renderPrintPreview(doc); switchTab('print-preview'); }
+}
+
+async function convertQtToBilling(qtDocNo) {
+    const result = await Swal.fire({
+        icon: 'question',
+        title: 'แปลงเป็นใบวางบิล?',
+        html: `สร้าง <b>ใบวางบิล/ใบส่งของ ฉบับใหม่</b> จากใบเสนอราคา <b>${esc(qtDocNo)}</b><br><span class="text-xs text-slate-500">(QT จะเปลี่ยนสถานะเป็น Billed — เอกสารเดิมยังอยู่ครบ)</span>`,
+        showCancelButton: true,
+        confirmButtonText: '➡️ สร้างใบวางบิล',
+        cancelButtonText: 'ยกเลิก'
+    });
+    if (!result.isConfirmed) return;
+    try {
+        const res = await gs('apiConvertQtToBilling', TOKEN, qtDocNo);
+        await loadBootstrapSilent();
+        currentPreviewDoc = res.invoice;
+        renderPrintPreview(res.invoice);
+        switchTab('print-preview');
+        Swal.fire('สำเร็จ!', `สร้างใบวางบิลเลขที่ ${res.invoice.docNo} (อ้างอิง ${qtDocNo})`, 'success');
+    } catch (e) { Swal.fire('ไม่สำเร็จ', e.message, 'error'); }
+}
+
+async function loadBootstrapSilent() {
+    BOOT = await gs('apiGetBootstrap', TOKEN);
+    renderAll();
+}
+
+function cancelDocumentPrompt(docNo) {
+    Swal.fire({
+        title: `ยกเลิกเอกสาร ${docNo}`,
+        text: 'กรุณาระบุเหตุผลในการยกเลิก (จำเป็น):',
+        input: 'textarea',
+        inputPlaceholder: 'เช่น ลูกค้ายกเลิกออเดอร์ / ออกเอกสารผิดพลาด...',
+        showCancelButton: true,
+        confirmButtonText: 'ยืนยันการยกเลิก',
+        confirmButtonColor: '#e11d48',
+        cancelButtonText: 'ถอยกลับ',
+        preConfirm: (reason) => {
+            if (!reason || reason.trim() === '') { Swal.showValidationMessage('จำเป็นต้องระบุเหตุผล'); return false; }
+            return reason.trim();
+        }
+    }).then(async (result) => {
+        if (!result.isConfirmed) return;
+        try {
+            await gs('apiCancelDocument', TOKEN, docNo, result.value);
+            await loadBootstrapSilent();
+            Swal.fire('ยกเลิกเอกสารเรียบร้อย', 'บันทึกเหตุผลลง Audit Log แล้ว', 'success');
+        } catch (e) { Swal.fire('ไม่สำเร็จ', e.message, 'error'); }
+    });
+}
+
+/* ============================================================
+ * PRINT PREVIEW ENGINE (A4 MULTI-PAGE)
+ * ============================================================ */
+function renderPrintPreview(doc) {
+    currentPreviewDoc = doc;
+    document.getElementById('preview-doc-no-label').innerText = doc.docNo;
+    document.getElementById('preview-doc-type-label').innerText = TYPE_LABELS[doc.docType] || doc.docType;
+    document.getElementById('preview-item-count-label').innerText = `รายการทั้งหมด: ${(doc.items || []).length} รายการ`;
+
+    const badge = document.getElementById('print-preview-date-status');
+    if (doc.showDateOnPrint) {
+        badge.className = 'text-xs font-semibold px-2.5 py-1 rounded bg-emerald-100 text-emerald-800 border border-emerald-300';
+        badge.innerText = `📅 ลงวันที่: ${fmtDateTH(doc.docDate)}`;
+    } else {
+        badge.className = 'text-xs font-semibold px-2.5 py-1 rounded bg-amber-100 text-amber-800 border border-amber-300';
+        badge.innerText = '📅 ไม่ลงวันที่ (เว้นว่าง)';
+    }
+
+    const st = BOOT.settings;
+    const cus = BOOT.customers.find(c => c.id === doc.cusId) || { name: doc.cusName, address:'-', taxId:'-', phone:'-' };
+    const dateText = doc.showDateOnPrint ? fmtDateTH(doc.docDate) : '___________';
+    const items = doc.items || [];
+
+    const pages = [];
+    for (let i = 0; i < items.length; i += ITEMS_PER_PAGE) pages.push(items.slice(i, i + ITEMS_PER_PAGE));
+    if (!pages.length) pages.push([]);
+    const totalPages = pages.length;
+
+    const container = document.getElementById('a4-render-area');
+    container.innerHTML = '';
+
+    pages.forEach((pageItems, pi) => {
+        const isLast = pi === totalPages - 1;
+        const page = document.createElement('div');
+        page.className = 'a4-page font-sans text-slate-800';
+
+        const headerHtml = `
+            <div>
+                <div class="flex justify-between items-start border-b-2 border-slate-800 pb-3 mb-3">
+                    <div>
+                        <h1 class="text-xl font-bold text-slate-900">${esc(st.shopName)}</h1>
+                        <p class="text-xs text-slate-600 mt-0.5">ที่อยู่: ${esc(st.shopAddress)}</p>
+                        <p class="text-xs text-slate-600">โทร: ${esc(st.shopPhone)} | เลขประจำตัวผู้เสียภาษี: ${esc(st.shopTaxId)}</p>
+                    </div>
+                    <div class="text-right">
+                        <h2 class="text-lg font-bold uppercase tracking-wide ${doc.docType === 'QT' ? 'text-emerald-800' : 'text-blue-800'}">${TYPE_LABELS[doc.docType]}</h2>
+                        <p class="text-xs text-slate-700 font-mono font-bold mt-1">เลขที่: ${esc(doc.docNo)}</p>
+                        <p class="text-xs text-slate-500 mt-1">วันที่: <strong class="font-mono">${dateText}</strong></p>
+                        ${doc.refDocNo ? `<p class="text-xs text-slate-500">อ้างอิง: ${esc(doc.refDocNo)}</p>` : ''}
+                        <p class="text-xs text-slate-500 font-bold mt-1">หน้า ${pi + 1} / ${totalPages}</p>
+                    </div>
+                </div>
+                ${pi === 0 ? `
+                <div class="text-xs leading-relaxed space-y-1.5 mb-3 bg-slate-50 p-3 rounded border border-slate-200">
+                    <div class="flex justify-between font-semibold flex-wrap gap-1">
+                        <span><strong>เรียน:</strong> ${esc(cus.name)}</span>
+                        <span><strong>เลขภาษีลูกค้า:</strong> ${esc(cus.taxId)}</span>
+                    </div>
+                    <p><strong>ที่อยู่:</strong> ${esc(cus.address)} | <strong>โทร:</strong> ${esc(cus.phone)}</p>
+                    ${doc.docType === 'QT' ? `<p><strong>เรื่อง:</strong> ${esc(doc.subject || 'ใบเสนอราคาพิจารณาจัดซื้อจัดจ้าง')}</p>` : ''}
+                </div>` : ''}
+            </div>`;
+
+        const rowsHtml = pageItems.map((it, ii) => `
+            <tr>
+                <td class="py-1.5 px-2 text-center font-mono text-slate-500">${pi * ITEMS_PER_PAGE + ii + 1}</td>
+                <td class="py-1.5 px-2 font-medium">${esc(it.prodName)}</td>
+                <td class="py-1.5 px-2 text-center font-mono">${esc(it.unit || '-')}</td>
+                <td class="py-1.5 px-2 text-center font-mono">${fmtShort(it.qty)}</td>
+                <td class="py-1.5 px-2 text-right font-mono">${fmt(it.unitPrice)}</td>
+                <td class="py-1.5 px-2 text-right font-mono font-semibold">${fmt(it.totalPrice)}</td>
+            </tr>`).join('');
+
+        let signHtml = '';
+        if (isLast) {
+            signHtml = doc.docType === 'QT' ? `
+                <div class="flex justify-end pt-4 border-t border-slate-300">
+                    <div class="text-center w-64 text-xs text-slate-800 space-y-1">
+                        <p class="mb-10 font-medium">ในนาม ${esc(st.shopName)}</p>
+                        <p class="border-b border-slate-400 w-48 mx-auto mb-1"></p>
+                        <p class="font-bold text-slate-900">(${esc(st.signatoryName || st.managerName)})</p>
+                        <p class="text-slate-600 text-[11px]">ผู้จัดการ / ผู้มีอำนาจลงนาม</p>
+                        <p class="text-slate-400 text-[10px] pt-1">วันที่ _____/_____/_________</p>
+                    </div>
+                </div>` : `
+                <div class="grid grid-cols-3 gap-2 text-center text-xs text-slate-800 pt-4 border-t border-slate-300">
+                    <div>
+                        <p class="mb-9 font-medium">ได้รับสินค้าถูกต้องครบถ้วน<br>เรียบร้อยแล้ว</p>
+                        <p class="border-b border-slate-400 w-36 mx-auto mb-1"></p>
+                        <p class="font-bold text-slate-900">ผู้รับของ</p>
+                        <p class="text-slate-400 text-[10px] pt-0.5">วันที่ _____/_____/_________</p>
+                    </div>
+                    <div>
+                        <p class="mb-9 font-medium">ส่งมอบสินค้าตามรายการ<br>เรียบร้อยแล้ว</p>
+                        <p class="border-b border-slate-400 w-36 mx-auto mb-1"></p>
+                        <p class="font-bold text-slate-900">ผู้ส่งของ</p>
+                        <p class="text-slate-400 text-[10px] pt-0.5">วันที่ _____/_____/_________</p>
+                    </div>
+                    <div>
+                        <p class="mb-9 font-medium">ในนาม ${esc(st.shopName)}</p>
+                        <p class="border-b border-slate-400 w-36 mx-auto mb-1"></p>
+                        <p class="font-bold text-slate-900">(${esc(st.signatoryName || st.managerName)})</p>
+                        <p class="text-slate-600 text-[11px]">ผู้จัดการ / ผู้มีอำนาจลงนาม</p>
+                        <p class="text-slate-400 text-[10px] pt-0.5">วันที่ _____/_____/_________</p>
+                    </div>
+                </div>`;
+        }
+
+        const footerHtml = `
+            <div class="mt-4 pt-3 border-t border-slate-300">
+                ${isLast ? `
+                <div class="grid grid-cols-2 gap-4 items-start mb-4">
+                    <div class="text-xs text-slate-700 space-y-1">
+                        ${doc.docType === 'QT' ? `
+                        <p class="font-bold text-slate-900">เงื่อนไขการเสนอราคา:</p>
+                        <div class="grid grid-cols-2 gap-1 bg-slate-50 p-2 rounded border border-slate-200 font-medium">
+                            <p>• กำหนดส่งมอบ: <strong class="font-mono">${doc.sendDays}</strong> วัน</p>
+                            <p>• กำหนดยืนราคา: <strong class="font-mono">${doc.confirmDays}</strong> วัน</p>
+                        </div>` : ''}
+                        ${doc.notes ? `<p class="text-slate-600 pt-1"><strong>หมายเหตุ:</strong> ${esc(doc.notes)}</p>` : ''}
+                    </div>
+                    <div class="bg-slate-50 p-3 rounded border border-slate-300 text-xs space-y-1">
+                        <div class="flex justify-between text-slate-600">
+                            <span>ยอดรวมก่อนภาษี:</span><span class="font-mono">฿${fmt(doc.subTotal)}</span>
+                        </div>
+                        <div class="flex justify-between text-slate-600">
+                            <span>ภาษีมูลค่าเพิ่ม ${Math.round(vatRate()*100)}%:</span><span class="font-mono">฿${fmt(doc.vatAmount)}</span>
+                        </div>
+                        <div class="flex justify-between font-bold text-slate-900 text-sm border-t border-slate-300 pt-1">
+                            <span>รวมทั้งสิ้น:</span><span class="font-mono text-emerald-800">฿${fmt(doc.grandTotal)}</span>
+                        </div>
+                    </div>
+                </div>` : `
+                <div class="text-right text-xs text-slate-500 italic py-2">(รายการยกไปรวมในหน้าถัดไป...)</div>`}
+                ${signHtml}
+            </div>`;
+
+        page.innerHTML = `
+            ${headerHtml}
+            <table class="w-full text-xs text-left border-collapse">
+                <thead>
+                    <tr class="bg-slate-200 text-slate-800 border-y border-slate-400 font-bold">
+                        <th class="py-2 px-2 text-center w-10">ลำดับ</th>
+                        <th class="py-2 px-2">รายการสินค้า / บริการ</th>
+                        <th class="py-2 px-2 text-center w-14">หน่วย</th>
+                        <th class="py-2 px-2 text-center w-16">จำนวน</th>
+                        <th class="py-2 px-2 text-right w-24">ราคา/หน่วย</th>
+                        <th class="py-2 px-2 text-right w-28">จำนวนเงิน</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-200">${rowsHtml}</tbody>
+            </table>
+            ${footerHtml}`;
+        container.appendChild(page);
+    });
+}
+
+async function triggerBrowserPrint() {
+    if (!currentPreviewDoc) return;
+    try { await gs('apiLogPrint', TOKEN, currentPreviewDoc.docNo, 'PRINT'); } catch (e) {}
+    window.print();
+}
+
+async function exportPdfToDrive() {
+    if (!currentPreviewDoc) return;
+    exportSinglePdf(currentPreviewDoc.docNo);
+}
+
+async function exportSinglePdf(docNo) {
+    try {
+        const res = await gs('apiExportPdf', TOKEN, docNo);
+        const result = await Swal.fire({
+            icon: 'success',
+            title: 'สร้าง PDF สำเร็จ',
+            html: `ไฟล์ <b>${esc(res.fileName)}</b> ถูกบันทึกใน Google Drive (โฟลเดอร์ SmartBilling_PDF)<br><br>
+                   <a href="${res.url}" target="_blank" class="text-blue-600 underline">📄 เปิดไฟล์ PDF</a>`,
+            showCancelButton: true,
+            confirmButtonText: 'เปิดไฟล์',
+            cancelButtonText: 'ปิด'
+        });
+        if (result.isConfirmed) window.open(res.url, '_blank');
+    } catch (e) {
+        Swal.fire('ส่งออก PDF ไม่สำเร็จ', e.message, 'error');
+    }
+}
+
+/* ============================================================
+ * MASTER DATA — PRODUCTS
+ * ============================================================ */
+function renderMasterDB() {
+    const pTbody = document.getElementById('master-products-tbody');
+    pTbody.innerHTML = BOOT.products.map(p => {
+        const low = p.remainingQty <= p.reorderPoint;
+        return `
+        <tr class="hover:bg-slate-50">
+            <td class="p-3 font-mono font-bold text-slate-700 text-xs">${esc(p.id)}</td>
+            <td class="p-3 font-medium text-slate-800">${esc(p.name)}</td>
+            <td class="p-3 text-xs text-slate-500">${esc(p.category)}</td>
+            <td class="p-3 text-center text-xs">${esc(p.unit)}</td>
+            <td class="p-3 text-right font-mono font-semibold text-xs">฿${fmtShort(p.price)}</td>
+            <td class="p-3 text-center font-mono font-bold text-xs ${low ? 'text-rose-600' : 'text-slate-700'}">${p.remainingQty}</td>
+            <td class="p-3 text-center font-mono text-slate-400 text-xs">${p.reorderPoint}</td>
+            <td class="p-3 text-center">
+                <span class="px-2 py-0.5 text-xs rounded-full font-semibold ${low ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-800'}">${esc(p.status)}</span>
+            </td>
+            <td class="p-3 text-center whitespace-nowrap">
+                <button onclick="openProductModal({id:'${esc(p.id)}'})" class="text-blue-600 text-xs font-bold mr-1">✏️</button>
+                <button onclick="deleteMasterItem('Product','${esc(p.id)}','${esc(p.name)}')" class="text-rose-500 text-xs font-bold">🗑️</button>
+            </td>
+        </tr>`;
+    }).join('');
+
+    const cTbody = document.getElementById('master-customers-tbody');
+    cTbody.innerHTML = BOOT.customers.map(c => `
+        <tr class="hover:bg-slate-50">
+            <td class="p-3 font-mono font-bold text-slate-700 text-xs">${esc(c.id)}</td>
+            <td class="p-3 font-semibold text-slate-800">${esc(c.name)}</td>
+            <td class="p-3 text-xs text-slate-600">${esc(c.address)}</td>
+            <td class="p-3 text-xs font-mono">${esc(c.phone)}</td>
+            <td class="p-3 text-xs">${esc(c.email)}</td>
+            <td class="p-3 text-xs font-mono text-slate-600">${esc(c.taxId)}</td>
+            <td class="p-3 text-center whitespace-nowrap">
+                <button onclick="openCustomerModal({id:'${esc(c.id)}'})" class="text-blue-600 text-xs font-bold mr-1">✏️</button>
+                <button onclick="deleteMasterItem('Customer','${esc(c.id)}','${esc(c.name)}')" class="text-rose-500 text-xs font-bold">🗑️</button>
+            </td>
+        </tr>`).join('');
+
+    const uTbody = document.getElementById('master-users-tbody');
+    uTbody.innerHTML = BOOT.users.map(u => `
+        <tr class="hover:bg-slate-50">
+            <td class="p-3 font-mono font-bold text-slate-700 text-xs">${esc(u.id)}</td>
+            <td class="p-3 font-semibold text-slate-800">${esc(u.username)}</td>
+            <td class="p-3 text-xs">${u.role === 'Admin' ? '<span class="px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 font-semibold">Admin</span>' : '<span class="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">Staff</span>'}</td>
+            <td class="p-3 text-center">${u.active ? '✅' : '⛔'}</td>
+            <td class="p-3 text-center whitespace-nowrap">
+                <button onclick="openUserModal({id:'${esc(u.id)}'})" class="text-blue-600 text-xs font-bold mr-1">✏️</button>
+                <button onclick="deleteMasterItem('User','${esc(u.id)}','${esc(u.username)}')" class="text-rose-500 text-xs font-bold">🗑️</button>
+            </td>
+        </tr>`).join('');
+}
+
+const swalInputCls = 'swal2-input !w-full !m-0 !mb-2 !text-sm';
+
+function openProductModal(opts) {
+    opts = opts || {};
+    const p = opts.id ? BOOT.products.find(x => x.id === opts.id) : null;
+    Swal.fire({
+        title: p ? '✏️ แก้ไขสินค้า (' + p.id + ')' : '➕ เพิ่มสินค้าใหม่',
+        width: 480,
+        html: `
+            <div class="text-left text-sm space-y-1">
+                <label class="text-xs font-semibold text-slate-600">ชื่อสินค้า / บริการ *</label>
+                <input id="m-prod-name" value="${esc(p ? p.name : (opts.prefillName || ''))}" class="${swalInputCls}">
+                <div class="grid grid-cols-2 gap-2">
+                    <div><label class="text-xs font-semibold text-slate-600">หมวดหมู่</label>
+                    <input id="m-prod-cat" value="${esc(p ? p.category : '')}" placeholder="บริการ/ฮาร์ดแวร์..." class="${swalInputCls}"></div>
+                    <div><label class="text-xs font-semibold text-slate-600">หน่วยนับ</label>
+                    <input id="m-prod-unit" value="${esc(p ? p.unit : '')}" placeholder="ชิ้น/กล่อง..." class="${swalInputCls}"></div>
+                </div>
+                <div class="grid grid-cols-2 gap-2">
+                    <div><label class="text-xs font-semibold text-slate-600">ราคาต่อหน่วย *</label>
+                    <input type="number" id="m-prod-price" value="${p ? p.price : (opts.prefillPrice || '')}" class="${swalInputCls}"></div>
+                    <div><label class="text-xs font-semibold text-slate-600">จำนวนคงคลัง</label>
+                    <input type="number" id="m-prod-remain" value="${p ? p.remainingQty : 0}" class="${swalInputCls}"></div>
+                </div>
+                <div class="grid grid-cols-2 gap-2">
+                    <div><label class="text-xs font-semibold text-slate-600">จุดสั่งซื้อ</label>
+                    <input type="number" id="m-prod-reorder" value="${p ? p.reorderPoint : 5}" class="${swalInputCls}"></div>
+                    <div><label class="text-xs font-semibold text-slate-600">สถานะ</label>
+                    <select id="m-prod-status" class="${swalInputCls}">
+                        ${['ปกติ','จุดสั่งซื้อ','หมด','ระงับ'].map(s => `<option ${p && p.status === s ? 'selected' : ''}>${s}</option>`).join('')}
+                    </select></div>
+                </div>
+            </div>`,
+        showCancelButton: true,
+        confirmButtonText: '💾 บันทึก',
+        cancelButtonText: 'ยกเลิก',
+        focusConfirm: false,
+        preConfirm: () => ({
+            id: p ? p.id : '',
+            name: document.getElementById('m-prod-name').value.trim(),
+            category: document.getElementById('m-prod-cat').value.trim() || 'ทั่วไป',
+            unit: document.getElementById('m-prod-unit').value.trim() || 'ชิ้น',
+            price: parseFloat(document.getElementById('m-prod-price').value),
+            remainingQty: parseInt(document.getElementById('m-prod-remain').value) || 0,
+            reorderPoint: parseInt(document.getElementById('m-prod-reorder').value) || 0,
+            status: document.getElementById('m-prod-status').value
+        })
+    }).then(async (result) => {
+        if (!result.isConfirmed) return;
+        const data = result.value;
+        if (!data.name || isNaN(data.price)) { Swal.showValidationMessage && Swal.fire('ข้อมูลไม่ครบ', 'กรุณากรอกชื่อสินค้าและราคา', 'error'); return; }
+        try {
+            const res = await gs('apiSaveProduct', TOKEN, data);
+            if (p) Object.assign(BOOT.products.find(x => x.id === p.id), res.product);
+            else BOOT.products.push(res.product);
+            refreshProductsDatalist();
+            renderMasterDB();
+            if (opts.rowIndex != null) {
+                formItems[opts.rowIndex].prodId = res.product.id;
+                formItems[opts.rowIndex].isCustom = false;
+                formItems[opts.rowIndex].unitPrice = res.product.price;
+                formItems[opts.rowIndex].unit = res.product.unit;
+                renderFormItemRows();
+            }
+            Swal.fire('สำเร็จ', `บันทึกสินค้า ${res.product.id}: ${res.product.name} ลง Google Sheets แล้ว`, 'success');
+        } catch (e) { Swal.fire('ไม่สำเร็จ', e.message, 'error'); }
+    });
+}
+
+function openCustomerModal(opts) {
+    opts = opts || {};
+    const c = opts.id ? BOOT.customers.find(x => x.id === opts.id) : null;
+    Swal.fire({
+        title: c ? '✏️ แก้ไขลูกค้า (' + c.id + ')' : '➕ เพิ่มลูกค้าใหม่',
+        width: 480,
+        html: `
+            <div class="text-left text-sm space-y-1">
+                <label class="text-xs font-semibold text-slate-600">ชื่อลูกค้า / บริษัท *</label>
+                <input id="m-cus-name" value="${esc(c ? c.name : '')}" class="${swalInputCls}">
+                <label class="text-xs font-semibold text-slate-600">ที่อยู่</label>
+                <textarea id="m-cus-address" rows="2" class="${swalInputCls}">${esc(c ? c.address : '')}</textarea>
+                <div class="grid grid-cols-2 gap-2">
+                    <div><label class="text-xs font-semibold text-slate-600">โทรศัพท์</label>
+                    <input id="m-cus-phone" value="${esc(c ? c.phone : '')}" class="${swalInputCls}"></div>
+                    <div><label class="text-xs font-semibold text-slate-600">เลขภาษี</label>
+                    <input id="m-cus-taxid" value="${esc(c ? c.taxId : '')}" class="${swalInputCls}"></div>
+                </div>
+                <label class="text-xs font-semibold text-slate-600">อีเมล</label>
+                <input id="m-cus-email" value="${esc(c ? c.email : '')}" class="${swalInputCls}">
+            </div>`,
+        showCancelButton: true,
+        confirmButtonText: '💾 บันทึก',
+        cancelButtonText: 'ยกเลิก',
+        focusConfirm: false,
+        preConfirm: () => ({
+            id: c ? c.id : '',
+            name: document.getElementById('m-cus-name').value.trim(),
+            address: document.getElementById('m-cus-address').value.trim(),
+            phone: document.getElementById('m-cus-phone').value.trim(),
+            taxId: document.getElementById('m-cus-taxid').value.trim(),
+            email: document.getElementById('m-cus-email').value.trim()
+        })
+    }).then(async (result) => {
+        if (!result.isConfirmed) return;
+        if (!result.value.name) { Swal.fire('ข้อมูลไม่ครบ', 'กรุณาระบุชื่อลูกค้า', 'error'); return; }
+        try {
+            const res = await gs('apiSaveCustomer', TOKEN, result.value);
+            if (c) Object.assign(BOOT.customers.find(x => x.id === c.id), res.customer);
+            else BOOT.customers.push(res.customer);
+            renderCustomerSelect();
+            renderMasterDB();
+            Swal.fire('สำเร็จ', `บันทึกลูกค้า ${res.customer.id}: ${res.customer.name} แล้ว`, 'success');
+        } catch (e) { Swal.fire('ไม่สำเร็จ', e.message, 'error'); }
+    });
+}
+
+function openUserModal(opts) {
+    if (String(USER.role).toLowerCase() !== 'admin') { Swal.fire('ไม่มีสิทธิ์', 'เฉพาะ Admin เท่านั้น', 'error'); return; }
+    opts = opts || {};
+    const u = opts.id ? BOOT.users.find(x => x.id === opts.id) : null;
+    Swal.fire({
+        title: u ? '✏️ แก้ไขผู้ใช้ (' + u.id + ')' : '➕ เพิ่มผู้ใช้ใหม่',
+        width: 440,
+        html: `
+            <div class="text-left text-sm space-y-1">
+                <label class="text-xs font-semibold text-slate-600">ชื่อผู้ใช้ (Username) *</label>
+                <input id="m-user-name" value="${esc(u ? u.username : '')}" class="${swalInputCls}">
+                <label class="text-xs font-semibold text-slate-600">รหัสผ่าน ${u ? '(เว้นว่าง = คงเดิม)' : '*'}</label>
+                <input type="password" id="m-user-pass" class="${swalInputCls}">
+                <div class="grid grid-cols-2 gap-2 items-end">
+                    <div><label class="text-xs font-semibold text-slate-600">ระดับการใช้งาน</label>
+                    <select id="m-user-role" class="${swalInputCls}">
+                        <option value="Staff" ${u && u.role === 'Staff' ? 'selected' : ''}>Staff</option>
+                        <option value="Admin" ${u && u.role === 'Admin' ? 'selected' : ''}>Admin</option>
+                    </select></div>
+                    <label class="inline-flex items-center gap-2 text-xs font-semibold text-slate-600 pb-2">
+                        <input type="checkbox" id="m-user-active" ${!u || u.active ? 'checked' : ''} class="accent-emerald-600"> เปิดใช้งาน
+                    </label>
+                </div>
+            </div>`,
+        showCancelButton: true,
+        confirmButtonText: '💾 บันทึก',
+        cancelButtonText: 'ยกเลิก',
+        focusConfirm: false,
+        preConfirm: () => ({
+            id: u ? u.id : '',
+            username: document.getElementById('m-user-name').value.trim(),
+            password: document.getElementById('m-user-pass').value,
+            role: document.getElementById('m-user-role').value,
+            active: document.getElementById('m-user-active').checked
+        })
+    }).then(async (result) => {
+        if (!result.isConfirmed) return;
+        const data = result.value;
+        if (!data.username || (!u && !data.password)) { Swal.fire('ข้อมูลไม่ครบ', 'กรุณากรอกชื่อผู้ใช้' + (u ? '' : 'และรหัสผ่าน'), 'error'); return; }
+        try {
+            await gs('apiSaveUser', TOKEN, data);
+            await loadBootstrapSilent();
+            Swal.fire('สำเร็จ', 'บันทึกผู้ใช้ ' + data.username + ' แล้ว', 'success');
+        } catch (e) { Swal.fire('ไม่สำเร็จ', e.message, 'error'); }
+    });
+}
+
+function deleteMasterItem(type, id, label) {
+    Swal.fire({
+        title: 'ยืนยันการลบ?',
+        html: `ลบ${type === 'Product' ? 'สินค้า' : type === 'Customer' ? 'ลูกค้า' : 'ผู้ใช้'} <b>${esc(label)}</b> (${esc(id)}) ออกจากฐานข้อมูล?<br><span class="text-xs text-rose-500">การลบไม่สามารถย้อนกลับได้</span>`,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#e11d48',
+        confirmButtonText: '🗑️ ลบเลย',
+        cancelButtonText: 'ยกเลิก'
+    }).then(async (result) => {
+        if (!result.isConfirmed) return;
+        try {
+            await gs('apiDelete' + type, TOKEN, id);
+            if (type === 'Product') BOOT.products = BOOT.products.filter(x => x.id !== id);
+            if (type === 'Customer') BOOT.customers = BOOT.customers.filter(x => x.id !== id);
+            if (type === 'User') BOOT.users = BOOT.users.filter(x => x.id !== id);
+            refreshProductsDatalist();
+            renderCustomerSelect();
+            renderMasterDB();
+            Toast.fire({ icon: 'success', title: 'ลบเรียบร้อย' });
+        } catch (e) { Swal.fire('ลบไม่สำเร็จ', e.message, 'error'); }
+    });
+}
+
+/* ============================================================
+ * SETTINGS & AUDIT LOGS
+ * ============================================================ */
+function fillSettingsForm() {
+    const s = BOOT.settings;
+    document.getElementById('setting-logo-url').value = s.logoUrl || '';
+    document.getElementById('setting-shop-name').value = s.shopName || '';
+    document.getElementById('setting-shop-address').value = s.shopAddress || '';
+    document.getElementById('setting-shop-phone').value = s.shopPhone || '';
+    document.getElementById('setting-shop-taxid').value = s.shopTaxId || '';
+    document.getElementById('setting-shop-email').value = s.shopEmail || '';
+    document.getElementById('setting-manager-name').value = s.managerName || '';
+    document.getElementById('setting-signatory-name').value = s.signatoryName || '';
+    document.getElementById('setting-pdf-folder-id').value = s.pdfFolderId || '';
+}
+
+async function saveShopSettings() {
+    const payload = {
+        logoUrl: document.getElementById('setting-logo-url').value.trim(),
+        shopName: document.getElementById('setting-shop-name').value.trim(),
+        shopAddress: document.getElementById('setting-shop-address').value.trim(),
+        shopPhone: document.getElementById('setting-shop-phone').value.trim(),
+        shopTaxId: document.getElementById('setting-shop-taxid').value.trim(),
+        shopEmail: document.getElementById('setting-shop-email').value.trim(),
+        managerName: document.getElementById('setting-manager-name').value.trim(),
+        signatoryName: document.getElementById('setting-signatory-name').value.trim(),
+        pdfFolderId: document.getElementById('setting-pdf-folder-id').value.trim(),
+        vatRate: BOOT.settings.vatRate || '0.07',
+        pdfFolderName: BOOT.settings.pdfFolderName || 'SmartBilling_PDF'
+    };
+    const btn = document.getElementById('save-settings-btn');
+    btn.disabled = true;
+    try {
+        const res = await gs('apiSaveSettings', TOKEN, payload);
+        BOOT.settings = res.settings;
+        if (currentPreviewDoc) {
+            const fresh = BOOT.documents.find(d => d.docNo === currentPreviewDoc.docNo);
+            if (fresh) renderPrintPreview(fresh);
+        }
+        Swal.fire('บันทึกสำเร็จ', 'อัปเดตการตั้งค่าร้านค้าแล้ว', 'success');
+    } catch (e) { Swal.fire('ไม่สำเร็จ', e.message, 'error'); }
+    finally { btn.disabled = false; }
+}
+
+function renderAuditLogs() {
+    const tbody = document.getElementById('audit-log-tbody');
+    if (!tbody || !BOOT) return;
+    tbody.innerHTML = BOOT.logs.length === 0
+        ? '<tr><td colspan="5" class="p-3 text-center text-slate-400">ยังไม่มีบันทึก</td></tr>'
+        : BOOT.logs.map(l => `
+        <tr class="hover:bg-slate-50">
+            <td class="p-2.5 text-slate-500 whitespace-nowrap">${esc(l.timestamp)}</td>
+            <td class="p-2.5 font-bold text-slate-700">${esc(l.user)}</td>
+            <td class="p-2.5">
+                <span class="px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                    l.action.includes('Cancel') ? 'bg-rose-100 text-rose-800' :
+                    l.action.includes('Print') || l.action.includes('PDF') ? 'bg-blue-100 text-blue-800' :
+                    l.action.includes('Login') || l.action.includes('Logout') ? 'bg-purple-100 text-purple-800' :
+                    l.action.includes('Delete') ? 'bg-orange-100 text-orange-800' :
+                    'bg-emerald-100 text-emerald-800'}">${esc(l.action)}</span>
+            </td>
+            <td class="p-2.5 font-mono text-slate-600">${esc(l.docNo)}</td>
+            <td class="p-2.5 text-slate-700">${esc(l.details)}</td>
+        </tr>`).join('');
+}
+</script>
