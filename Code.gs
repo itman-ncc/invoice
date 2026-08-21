@@ -1182,35 +1182,44 @@ function buildStandaloneHtml_(doc, items, st) {
   else stampParts.push('จัดพิมพ์ล่าสุด: -');
   const printStamp = fmtDotTH_(new Date()) + ' | ' + stampParts.join(' / ');
 
+  /* ธีมสีตามประเภทเอกสาร — เอกสารสีทุกฉบับ (QT เขียว / IV-RE น้ำเงิน / RC ม่วง) */
+  const THEMES = {
+    QT: { main: '#065f46', soft: '#ecfdf5', mid: '#a7f3d0' },
+    IV: { main: '#1e40af', soft: '#eff6ff', mid: '#bfdbfe' },
+    RE: { main: '#1e40af', soft: '#eff6ff', mid: '#bfdbfe' },
+    RC: { main: '#6b21a8', soft: '#faf5ff', mid: '#e9d5ff' }
+  };
+  const th = THEMES[doc.docType] || THEMES.IV;
+
   const head =
-    '<div style="display:flex;justify-content:space-between;border-bottom:2px solid #333;padding-bottom:8px;margin-bottom:8px">' +
+    '<div style="display:flex;justify-content:space-between;border-bottom:3px solid ' + th.main + ';padding-bottom:8px;margin-bottom:8px">' +
     '<div style="display:flex;align-items:flex-start;gap:10px">' +
     (st.logoUrl ? '<img src="' + esc_(st.logoUrl) + '" style="height:56px;max-width:110px;object-fit:contain" onerror="this.style.display=\'none\'">' : '') +
-    '<div><div style="font-size:18px;font-weight:bold">' + esc_(st.shopName) + '</div>' +
+    '<div><div style="font-size:18px;font-weight:bold;color:' + th.main + '">' + esc_(st.shopName) + '</div>' +
     '<div style="font-size:11px">ที่อยู่: ' + esc_(st.shopAddress) + '</div>' +
     '<div style="font-size:11px">โทร: ' + esc_(st.shopPhone) + ' | เลขประจำตัวผู้เสียภาษี: ' + esc_(st.shopTaxId) + '</div></div></div>' +
-    '<div style="text-align:right"><div style="font-size:16px;font-weight:bold">' + esc_(typeLabel_(doc.docType)) + '</div>' +
-    '<div style="font-size:12px;font-weight:bold">' + esc_(doc.docNo) + '</div>' +
+    '<div style="text-align:right"><div style="display:inline-block;background:' + th.soft + ';color:' + th.main + ';border:1px solid ' + th.mid + ';border-radius:6px;padding:2px 12px;font-size:15px;font-weight:bold">' + esc_(typeLabel_(doc.docType)) + '</div>' +
+    '<div style="font-size:12px;font-weight:bold;color:' + th.main + ';margin-top:4px">' + esc_(doc.docNo) + '</div>' +
     '<div style="font-size:11px">วันที่: ' + dateText + '</div>' +
     (doc.refDocNo ? '<div style="font-size:11px">อ้างอิง: ' + esc_(doc.refDocNo) + '</div>' : '') +
     '</div></div>';
 
   const custInfo =
-    '<table style="width:100%;font-size:12px;margin-bottom:8px;background:#f5f5f5"><tr>' +
-    '<td><b>ลูกค้า:</b> ' + esc_(doc.cusName) + '<br>' + esc_(st.shopAddress ? '' : '') + '</td>' +
-    '<td style="text-align:right"><b>เรื่อง:</b> ' + esc_(doc.subject || '-') + '</td></tr></table>';
+    '<table style="width:100%;font-size:12px;margin-bottom:8px;background:' + th.soft + ';border-left:4px solid ' + th.main + ';border-radius:4px"><tr>' +
+    '<td style="padding:6px"><b>ลูกค้า:</b> ' + esc_(doc.cusName) + '</td>' +
+    '<td style="padding:6px;text-align:right"><b>เรื่อง:</b> ' + esc_(doc.subject || '-') + '</td></tr></table>';
 
   let body = '';
   pages.forEach(function(pageItems, pi) {
     const isLast = pi === totalPages - 1;
     body += '<div style="' + (pi < totalPages - 1 ? 'page-break-after:always;' : '') + '">';
-    body += '<div style="text-align:right;font-size:11px;margin-bottom:4px">หน้า ' + (pi + 1) + '/' + totalPages + '</div>';
+    body += '<div style="text-align:right;font-size:11px;margin-bottom:4px;color:' + th.main + ';font-weight:bold">หน้า ' + (pi + 1) + '/' + totalPages + '</div>';
     if (pi === 0) body += head + custInfo;
     body += '<table style="width:100%;border-collapse:collapse;font-size:12px" border="1" cellpadding="4">' +
-      '<tr style="background:#e5e7eb"><th style="width:40px">ลำดับ</th><th>รายการ</th><th style="width:60px">จำนวน</th>' +
+      '<tr style="background:' + th.main + ';color:#ffffff"><th style="width:40px">ลำดับ</th><th>รายการ</th><th style="width:60px">จำนวน</th>' +
       '<th style="width:90px">ราคา/หน่วย</th><th style="width:100px">จำนวนเงิน</th></tr>';
     pageItems.forEach(function(it, ii) {
-      body += '<tr><td style="text-align:center">' + (pi * ITEMS_PER_PAGE + ii + 1) + '</td>' +
+      body += '<tr' + (ii % 2 ? ' style="background:' + th.soft + '"' : '') + '><td style="text-align:center">' + (pi * ITEMS_PER_PAGE + ii + 1) + '</td>' +
         '<td>' + esc_(it.prodName) + '</td><td style="text-align:center">' + it.qty + ' ' + esc_(it.unit) + '</td>' +
         '<td style="text-align:right">' + thaiMoney_(it.unitPrice) + '</td>' +
         '<td style="text-align:right">' + thaiMoney_(it.totalPrice) + '</td></tr>';
@@ -1221,10 +1230,10 @@ function buildStandaloneHtml_(doc, items, st) {
       body += '<table style="width:100%;margin-top:10px;font-size:12px"><tr>' +
         '<td style="vertical-align:top;width:55%"><b>หมายเหตุ:</b> ' + esc_(doc.notes || '-') +
         (doc.docType === 'QT' ? '<br>กำหนดส่งมอบ: ' + doc.sendDays + ' วัน | กำหนดยืนราคา: ' + doc.confirmDays + ' วัน' : '') + '</td>' +
-        '<td style="vertical-align:top;text-align:right">' +
+        '<td style="vertical-align:top;text-align:right;background:' + th.soft + ';border:1px solid ' + th.mid + ';border-radius:6px;padding:8px">' +
         'ยอดรวมก่อนภาษี: ' + thaiMoney_(doc.subTotal) + ' บาท<br>' +
         'ภาษีมูลค่าเพิ่ม: ' + thaiMoney_(doc.vatAmount) + ' บาท<br>' +
-        '<b style="font-size:14px">รวมทั้งสิ้น: ' + thaiMoney_(doc.grandTotal) + ' บาท</b></td></tr></table>';
+        '<b style="font-size:14px;color:' + th.main + '">รวมทั้งสิ้น: ' + thaiMoney_(doc.grandTotal) + ' บาท</b></td></tr></table>';
     }
 
     body += '<div style="margin-top:40px;font-size:12px;text-align:center">';
