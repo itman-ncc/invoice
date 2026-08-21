@@ -83,6 +83,23 @@
         tr { page-break-inside: avoid; }
     }
 
+    /* Ctrl+P บนหน้าหลัก: แสดงเฉพาะกรอบเอกสาร A4 (กันหน้าว่างจาก header/แท็บอื่น) */
+    @media print {
+        body.printing * { visibility: hidden !important; }
+        body.printing #a4-render-area,
+        body.printing #a4-render-area * { visibility: visible !important; }
+        body.printing #a4-render-area {
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
+            width: 210mm !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            background: none !important;
+            box-shadow: none !important;
+        }
+    }
+
     /* SweetAlert z-index above header */
     .swal2-container { z-index: 10000 !important; }
 

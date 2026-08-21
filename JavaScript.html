@@ -1046,12 +1046,42 @@ function renderPrintPreview(doc) {
     });
 }
 
+/* จัดการ Ctrl+P บนหน้าหลัก: ซ่อนทุกอย่างยกเว้นกรอบเอกสาร A4 */
+window.addEventListener('beforeprint', () => document.body.classList.add('printing'));
+window.addEventListener('afterprint', () => document.body.classList.remove('printing'));
+
 async function triggerBrowserPrint() {
     if (!currentPreviewDoc) return;
     if (!currentPreviewDoc.isSample) {
         try { await gs('apiLogPrint', TOKEN, currentPreviewDoc.docNo, 'PRINT'); } catch (e) {}
     }
-    window.print();
+
+    /* เปิดหน้าต่างแยกที่มีเฉพาะเอกสาร A4 → ไม่ติดปัญหาหน้าว่าง/โดน header บัง
+     * ใช้ได้ทั้งเปิดตรงและฝังใน iframe (GitHub Pages) */
+    const area = document.getElementById('a4-render-area');
+    const w = window.open('', '_blank', 'width=920,height=1050');
+    if (!w) {
+        Swal.fire('ไม่สามารถเปิดหน้าต่างพิมพ์ได้', 'เบราว์เซอร์บล็อก Pop-up — กรุณาอนุญาต Pop-up สำหรับไซต์นี้แล้วลองอีกครั้ง', 'warning');
+        return;
+    }
+    const styleTags = Array.from(document.querySelectorAll('style')).map(s => '<style>' + s.textContent + '</style>').join('\n');
+    w.document.open();
+    w.document.write('<!DOCTYPE html><html lang="th"><head><meta charset="UTF-8"><title>' + esc(currentPreviewDoc.docNo || 'document') + '</title>'
+        + '<script src="https://cdn.tailwindcss.com"><\/script>'
+        + '<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&display=swap" rel="stylesheet">'
+        + styleTags
+        + '</head><body style="background:#ffffff">' + area.innerHTML + '</body></html>');
+    w.document.close();
+
+    let printed = false;
+    const doPrint = () => { if (printed) return; printed = true; try { w.focus(); w.print(); } catch (e) {} };
+    w.addEventListener('load', () => {
+        /* รอโลโก้/รูปภาพโหลดครบก่อนสั่งพิมพ์ */
+        const imgs = Array.from(w.document.images || []);
+        Promise.all(imgs.map(im => im.complete ? null : new Promise(res => { im.onload = im.onerror = res; })))
+            .then(() => setTimeout(doPrint, 400));
+    });
+    setTimeout(doPrint, 3500);
 }
 
 async function exportPdfToDrive() {
