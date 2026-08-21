@@ -55,12 +55,17 @@ function migrateSettings_() {
     const sh = SpreadsheetApp.openById(SHEET_ID).getSheetByName('Settings');
     if (!sh) return;
     const last = sh.getLastRow();
-    let hasFolderId = false;
+    let hasFolderId = false, hasLogoUrl = false;
     if (last > 1) {
       const keys = sh.getRange(2, 1, last - 1, 1).getValues();
-      hasFolderId = keys.some(function(r) { return String(r[0]) === 'pdfFolderId'; });
+      keys.forEach(function(r) {
+        const k = String(r[0]);
+        if (k === 'pdfFolderId') hasFolderId = true;
+        if (k === 'logoUrl') hasLogoUrl = true;
+      });
     }
     if (!hasFolderId) sh.appendRow(['pdfFolderId', DEFAULT_PDF_FOLDER_ID]);
+    if (!hasLogoUrl) sh.appendRow(['logoUrl', '']);
   } catch (e) {}
 }
 
@@ -103,6 +108,31 @@ function migrateSchema_() {
           creators.map(function(r) { const n = nameMap[String(r[0])] || String(r[0] || ''); return [n, n]; }));
       }
     }
+
+    /* Documents col 22: 'คำชี้แจง (Declaration)' — ข้อความยื่นเสนอราคา (CKEditor) */
+    if (dsh && String(dsh.getRange(1, Math.max(dsh.getLastColumn(), 1)).getValue()) !== 'คำชี้แจง (Declaration)') {
+      dsh.getRange(1, 22).setValue('คำชี้แจง (Declaration)');
+      dsh.setColumnWidth(22, 300);
+    }
+
+    /* ชีตใหม่: Categories / Units — สร้าง + seed อัตโนมัติสำหรับเดิมที่ยังไม่มี */
+    [['Categories', 'CAT-', ['อุปกรณ์ไอที', 'เฟอร์นิเจอร์และของใช้สำนักงาน', 'วัสดุสิ้นเปลือง', 'งานติดตั้ง/บริการ']],
+     ['Units', 'UNT-', ['ชิ้น', 'ชุด', 'อัน', 'กล่อง', 'แผ่น', 'ลัง', 'หน่วย', 'งาน']]
+    ].forEach(function(cfg) {
+      let sh = ss.getSheetByName(cfg[0]);
+      if (!sh) {
+        sh = ss.insertSheet(cfg[0]);
+        const headers = cfg[0] === 'Categories' ? ['รหัสหมวด', 'ชื่อหมวดหมู่สินค้า', 'Active'] : ['รหัสหน่วย', 'ชื่อหน่วยนับ', 'Active'];
+        sh.getRange(1, 1, 1, 3).setValues([headers]);
+        styleHeader_(sh, 3);
+        sh.setFrozenRows(1);
+      }
+      if (sh.getLastRow() < 2) {
+        sh.getRange(2, 1, cfg[2].length, 3).setValues(cfg[2].map(function(name, i) {
+          return [cfg[1] + pad_(i + 1, 3), name, true];
+        }));
+      }
+    });
   } catch (e) {}
 }
 
@@ -131,7 +161,11 @@ const DB_SCHEMA = [
   { name: 'Sessions',      headers: ['Token','รหัสผู้ใช้','ชื่อผู้ใช้','ระดับ','สร้างเมื่อ','หมดอายุ'],
     widths: [360,90,120,90,150,150] },
   { name: 'Payments',      headers: ['รหัสชำระเงิน','เลขที่เอกสาร','วันที่ชำระ','ยอดที่ชำระ','วิธีชำระเงิน','รายละเอียด (เลขเช็ค/โอน/อื่นๆ)','บันทึกโดย','บันทึกเมื่อ'],
-    widths: [110,110,110,120,110,240,90,150], moneyCols: ['D'] }
+    widths: [110,110,110,120,110,240,90,150], moneyCols: ['D'] },
+  { name: 'Categories',    headers: ['รหัสหมวด','ชื่อหมวดหมู่สินค้า','Active'],
+    widths: [100,260,80] },
+  { name: 'Units',         headers: ['รหัสหน่วย','ชื่อหน่วยนับ','Active'],
+    widths: [100,200,80] }
 ];
 
 function onOpen() {
@@ -169,6 +203,8 @@ function setupSystem() {
   seedUsers_(ss, log);
   seedCustomers_(ss, log);
   seedProducts_(ss, log);
+  seedCategories_(ss, log);
+  seedUnits_(ss, log);
   seedSettings_(ss, log);
   seedDocuments_(ss, log);
   seedAuditLog_(ss, log);
@@ -185,6 +221,28 @@ function seedUsers_(ss, log) {
     ['U-002', 'staff', sha256_('1234'), 'Staff', true, 'พนักงาน']
   ]);
   log.push('🌱 Users: admin/1234 (Admin), staff/1234 (Staff)');
+}
+
+/* ชีตหมวดหมู่สินค้า — seed ค่าเริ่มต้นครั้งแรก */
+function seedCategories_(ss, log) {
+  const sh = ss.getSheetByName('Categories');
+  if (!sh || sh.getLastRow() > 1) return;
+  const cats = ['อุปกรณ์ไอที', 'เฟอร์นิเจอร์และของใช้สำนักงาน', 'วัสดุสิ้นเปลือง', 'งานติดตั้ง/บริการ'];
+  sh.getRange(2, 1, cats.length, 3).setValues(cats.map(function(c, i) {
+    return ['CAT-' + pad_(i + 1, 3), c, true];
+  }));
+  log.push('🌱 Categories: ' + cats.length + ' หมวดเริ่มต้น');
+}
+
+/* ชีตหน่วยนับ — seed ค่าเริ่มต้นครั้งแรก */
+function seedUnits_(ss, log) {
+  const sh = ss.getSheetByName('Units');
+  if (!sh || sh.getLastRow() > 1) return;
+  const units = ['ชิ้น', 'ชุด', 'อัน', 'กล่อง', 'แผ่น', 'ลัง', 'หน่วย', 'งาน'];
+  sh.getRange(2, 1, units.length, 3).setValues(units.map(function(u, i) {
+    return ['UNT-' + pad_(i + 1, 3), u, true];
+  }));
+  log.push('🌱 Units: ' + units.length + ' หน่วยเริ่มต้น');
 }
 
 function seedCustomers_(ss, log) {
@@ -618,8 +676,79 @@ function apiGetBootstrap(token) {
     products: listProducts_(),
     users: listUsersSanitized_(),
     documents: listDocuments_(),
+    categories: listCategories_(),
+    units: listUnits_(),
     logs: listAuditLogs_(150)
   };
+}
+
+/* ===== หมวดหมู่สินค้า / หน่วยนับ — ใช้ในฟอร์มจัดทำเอกสารทุกฉบับ ===== */
+function listCategories_() {
+  return readAll_('Categories')
+    .filter(function(r) { return r[2] === true || String(r[2]).toUpperCase() === 'TRUE'; })
+    .map(function(r) { return { id: String(r[0]), name: String(r[1]) }; });
+}
+
+function listUnits_() {
+  return readAll_('Units')
+    .filter(function(r) { return r[2] === true || String(r[2]).toUpperCase() === 'TRUE'; })
+    .map(function(r) { return { id: String(r[0]), name: String(r[1]) }; });
+}
+
+function apiSaveCategory(token, id, name, active) {
+  const s = requireAuth_(token);
+  if (String(s.role).toLowerCase() !== 'admin') throw new Error('เฉพาะผู้ดูแลระบบ');
+  name = String(name || '').trim();
+  if (!name) throw new Error('กรุณาระบุชื่อหมวดหมู่');
+  const sh = sheet_('Categories');
+  if (id) {
+    const idx = findRowById_(sh, id);
+    if (idx < 0) throw new Error('ไม่พบหมวดหมู่ ' + id);
+    sh.getRange(idx, 2, 1, 2).setValues([[name, active !== false]]);
+  } else {
+    sh.appendRow([nextId_('Categories', 'CAT-', 3), name, active !== false]);
+  }
+  logAudit_(s.userName, id ? 'EditCategory' : 'AddCategory', name, 'หมวดหมู่สินค้า: ' + name);
+  return { ok: true };
+}
+
+function apiDeleteCategory(token, id) {
+  const s = requireAuth_(token);
+  if (String(s.role).toLowerCase() !== 'admin') throw new Error('เฉพาะผู้ดูแลระบบ');
+  const sh = sheet_('Categories');
+  const idx = findRowById_(sh, id);
+  if (idx < 0) throw new Error('ไม่พบหมวดหมู่ ' + id);
+  sh.deleteRow(idx);
+  logAudit_(s.userName, 'DeleteCategory', id, 'ลบหมวดหมู่สินค้า: ' + id);
+  return { ok: true };
+}
+
+function apiSaveUnit(token, id, name, active) {
+  const s = requireAuth_(token);
+  if (String(s.role).toLowerCase() !== 'admin') throw new Error('เฉพาะผู้ดูแลระบบ');
+  name = String(name || '').trim();
+  if (!name) throw new Error('กรุณาระบุชื่อหน่วยนับ');
+  const sh = sheet_('Units');
+  if (id) {
+    const idx = findRowById_(sh, id);
+    if (idx < 0) throw new Error('ไม่พบหน่วยนับ ' + id);
+    sh.getRange(idx, 2, 1, 2).setValues([[name, active !== false]]);
+  } else {
+    sh.appendRow([nextId_('Units', 'UNT-', 3), name, active !== false]);
+  }
+  logAudit_(s.userName, id ? 'EditUnit' : 'AddUnit', name, 'หน่วยนับ: ' + name);
+  return { ok: true };
+}
+
+function apiDeleteUnit(token, id) {
+  const s = requireAuth_(token);
+  if (String(s.role).toLowerCase() !== 'admin') throw new Error('เฉพาะผู้ดูแลระบบ');
+  const sh = sheet_('Units');
+  const idx = findRowById_(sh, id);
+  if (idx < 0) throw new Error('ไม่พบหน่วยนับ ' + id);
+  sh.deleteRow(idx);
+  logAudit_(s.userName, 'DeleteUnit', id, 'ลบหน่วยนับ: ' + id);
+  return { ok: true };
 }
 
 function listCustomers_() {
@@ -647,7 +776,7 @@ function listUsersSanitized_() {
 function rawDocuments_() {
   return readAll_('Documents').map(function(r) {
     return {
-      docNo: String(r[0]), docType: String(r[1]), docDate: String(r[2]),
+      docNo: String(r[0]), docType: String(r[1]), docDate: normDateStr_(r[2]),
       showDateOnPrint: r[3] === true || String(r[3]).toUpperCase() === 'TRUE',
       cusId: String(r[4]), cusName: String(r[5]), subject: String(r[6]),
       sendDays: Number(r[7]) || 30, confirmDays: Number(r[8]) || 30,
@@ -655,8 +784,9 @@ function rawDocuments_() {
       vatAmount: Number(r[11]) || 0, grandTotal: Number(r[12]) || 0,
       status: String(r[13] || 'Active'), cancelReason: String(r[14] || ''),
       notes: String(r[15] || ''), createdBy: String(r[16] || ''),
-      createdAt: String(r[17] || ''), updatedAt: String(r[18] || ''),
-      createdByName: String(r[19] || ''), updatedByName: String(r[20] || '')
+      createdAt: normDateStr_(r[17]), updatedAt: normDateStr_(r[18]),
+      createdByName: String(r[19] || ''), updatedByName: String(r[20] || ''),
+      declaration: String(r[21] || '')
     };
   });
 }
@@ -853,7 +983,7 @@ function docRowOf_(doc) {
           Number(doc.subTotal) || 0, Number(doc.vatAmount) || 0, Number(doc.grandTotal) || 0,
           doc.status || 'Active', doc.cancelReason || '', doc.notes || '',
           doc.createdBy || '', doc.createdAt || nowStr_(), nowStr_(),
-          doc.createdByName || '', doc.updatedByName || ''];
+          doc.createdByName || '', doc.updatedByName || '', String(doc.declaration || '')];
 }
 
 function appendItems_(docNo, items) {
@@ -880,6 +1010,10 @@ function apiSaveDocument(token, doc) {
   const s = requireAuth_(token);
   validateDoc_(doc);
 
+  /* ค่าเริ่มต้นเรื่อง (Subject) ตามประเภทเอกสาร — ใช้เมื่อผู้ใช้เว้นว่าง */
+  const SUBJECT_DEFAULTS = { QT: 'ยื่นเสนอราคา', IV: 'ยื่นใบวางบิล/ใบส่งของ', RE: 'ยื่นใบวางบิล/ใบส่งของ' };
+  if (!String(doc.subject || '').trim()) doc.subject = SUBJECT_DEFAULTS[doc.docType] || '';
+
   const subTotal = doc.items.reduce(function(acc, it) { return acc + (Number(it.totalPrice) || 0); }, 0);
   const vatRate = parseFloat(getSettings_().vatRate) || 0.07;
   const vatAmount = doc.vatEnabled === false ? 0 : subTotal * vatRate;
@@ -890,6 +1024,14 @@ function apiSaveDocument(token, doc) {
   const sh = sheet_('Documents');
 
   if (!doc.docNo) {
+    /* ใบวางบิล/ใบส่งของ (IV) ต้องอ้างอิงใบเสนอราคาเสมอ — ห้ามออกอิสระ */
+    if (doc.docType === 'IV') {
+      const ref = String(doc.refDocNo || '').trim();
+      if (!ref) throw new Error('ใบวางบิล/ใบส่งของ ต้องเลือกอ้างอิงจากใบเสนอราคาก่อน');
+      const qt = rawDocuments_().filter(function(d) { return d.docNo === ref; })[0];
+      if (!qt || qt.docType !== 'QT') throw new Error('ไม่พบใบเสนอราคา ' + ref);
+      if (qt.status !== 'Active') throw new Error('ใบเสนอราคา ' + ref + ' ถูกยกเลิกหรือถูกวางบิลไปแล้ว');
+    }
     doc.docNo = generateDocNo_(DOC_TYPES[doc.docType]);
     doc.status = 'Active';
     doc.createdBy = s.userName;
@@ -929,7 +1071,10 @@ function apiSaveDocument(token, doc) {
   doc.createdAt = existing.createdAt;
   doc.createdByName = existing.createdByName || getUserFullName_(existing.createdBy) || existing.createdBy;
   doc.updatedByName = s.fullName || s.userName;
-  sh.getRange(idx, 1, 1, 21).setValues([docRowOf_(doc)]);
+  /* คงค่าอ้างอิงเดิมไว้เสมอ (แก้ไขจากฟอร์มไม่ส่ง refDocNo ก็ไม่หาย) */
+  if (!String(doc.refDocNo || '').trim()) doc.refDocNo = existing.refDocNo || '';
+  if (!String(doc.declaration || '').trim()) doc.declaration = existing.declaration || '';
+  sh.getRange(idx, 1, 1, 22).setValues([docRowOf_(doc)]);
   deleteItemsOf_(doc.docNo);
   appendItems_(doc.docNo, doc.items);
   logAudit_(s.userName, 'EditDoc', doc.docNo, 'แก้ไขเอกสาร ' + doc.docNo);
@@ -1102,6 +1247,11 @@ function apiConvertBillingToReceipt(token, ivDocNo) {
   sheet_('Documents').appendRow(docRowOf_(receipt));
   appendItems_(receipt.docNo, itemsOf_(iv.docNo));
 
+  /* คัดลอกประวัติการชำระเงินของ IV มาผูกกับใบเสร็จ RE ด้วย → พิมพ์ใบเสร็จแยกได้สมบูรณ์ */
+  getPaymentsOf_(iv.docNo).forEach(function(p) {
+    recordPayment_(p.createdBy || s.userName, receipt.docNo, p.payDate, p.amount, p.method, p.detail);
+  });
+
   const sh = sheet_('Documents');
   const idx = findRowById_(sh, iv.docNo);
   sh.getRange(idx, 14).setValue('Paid');
@@ -1131,7 +1281,9 @@ function apiExportPdf(token, docNo) {
   if (!doc) throw new Error('ไม่พบเอกสาร ' + docNo);
   const items = itemsOf_(docNo);
   const settings = getSettings_();
-  const html = buildStandaloneHtml_(doc, items, settings);
+  /* RE/RC → แนบประวัติการชำระเงินลง PDF ด้วย */
+  const payments = (doc.docType === 'RE' || doc.docType === 'RC') ? getPaymentsOf_(docNo) : [];
+  const html = buildStandaloneHtml_(doc, items, settings, payments);
   const pdfBlob = Utilities.newBlob(html, 'text/html', docNo + '.html')
                           .getAs('application/pdf').setName(docNo + '.pdf');
   const folder = getOrCreateFolder_(settings.pdfFolderName || 'SmartBilling_PDF');
@@ -1153,6 +1305,25 @@ function fmtDotTH_(d) {
   return p(d.getDate()) + '.' + p(d.getMonth() + 1) + '.' + (d.getFullYear() + 543) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
 }
 
+/* Sheets เก็บ 'yyyy-MM-dd' เป็น Date object → normalize เป็นสตริง ISO ทุกครั้งที่อ่าน */
+function normDateStr_(v) {
+  if (v instanceof Date) {
+    const p = function(n) { return (n < 10 ? '0' : '') + n; };
+    return v.getFullYear() + '-' + p(v.getMonth() + 1) + '-' + p(v.getDate());
+  }
+  return String(v == null ? '' : v);
+}
+
+const TH_MONTHS_ = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
+                    'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
+
+/* รูปแบบ 18/สิงหาคม/2569 — สำหรับหัวเอกสารทุกฉบับ */
+function fmtThaiDate_(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ''));
+  if (!m) return String(iso || '');
+  return Number(m[3]) + '/' + TH_MONTHS_[Number(m[2]) - 1] + '/' + (Number(m[1]) + 543);
+}
+
 function getLastPrint_(docNo) {
   let best = null;
   readAll_('AuditLogs').forEach(function(r) {
@@ -1165,12 +1336,12 @@ function getLastPrint_(docNo) {
   return best;
 }
 
-function buildStandaloneHtml_(doc, items, st) {
+function buildStandaloneHtml_(doc, items, st, payments) {
   const pages = [];
   for (let i = 0; i < items.length; i += ITEMS_PER_PAGE) pages.push(items.slice(i, i + ITEMS_PER_PAGE));
   if (!pages.length) pages.push([]);
   const totalPages = pages.length;
-  const dateText = doc.showDateOnPrint ? esc_(doc.docDate) : '____________________';
+  const dateText = doc.showDateOnPrint ? esc_(fmtThaiDate_(doc.docDate)) : '____________________';
 
   /* ตรามุมล่างขวา: วัน.เดือน.ปี(พ.ศ.).เวลา | ผู้บันทึก(login)/แก้ไข/จัดพิมพ์ล่าสุด */
   const creatorNameS = doc.createdByName || doc.createdBy || '';
@@ -1214,7 +1385,13 @@ function buildStandaloneHtml_(doc, items, st) {
     const isLast = pi === totalPages - 1;
     body += '<div style="' + (pi < totalPages - 1 ? 'page-break-after:always;' : '') + '">';
     body += '<div style="text-align:right;font-size:11px;margin-bottom:4px;color:' + th.main + ';font-weight:bold">หน้า ' + (pi + 1) + '/' + totalPages + '</div>';
-    if (pi === 0) body += head + custInfo;
+    if (pi === 0) {
+      body += head + custInfo;
+      /* คำชี้แจงการยื่นเสนอราคา (QT) — ก่อนตารางรายการสินค้า */
+      if (doc.docType === 'QT' && doc.declaration) {
+        body += '<div style="font-size:11px;line-height:1.55;border:1px solid ' + th.mid + ';border-radius:4px;padding:6px 10px;margin-bottom:8px;background:#ffffff">' + doc.declaration + '</div>';
+      }
+    }
     body += '<table style="width:100%;border-collapse:collapse;font-size:12px" border="1" cellpadding="4">' +
       '<tr style="background:' + th.main + ';color:#ffffff"><th style="width:40px">ลำดับ</th><th>รายการ</th><th style="width:60px">จำนวน</th>' +
       '<th style="width:90px">ราคา/หน่วย</th><th style="width:100px">จำนวนเงิน</th></tr>';
@@ -1227,6 +1404,19 @@ function buildStandaloneHtml_(doc, items, st) {
     body += '</table>';
 
     if (isLast) {
+      /* ส่วนสรุปการชำระเงิน (RE/RC ที่มีประวัติชำระ) */
+      if (payments && payments.length) {
+        const paidSum = payments.reduce(function(s2, p) { return s2 + p.amount; }, 0);
+        body += '<table style="width:100%;margin-top:8px;font-size:12px;background:' + th.soft + ';border:1px solid ' + th.mid + ';border-radius:6px;border-collapse:collapse" cellpadding="4">' +
+          '<tr style="color:' + th.main + ';font-weight:bold"><td>การชำระเงิน</td><td style="text-align:center;width:95px">วันที่ชำระ</td><td style="text-align:right;width:105px">จำนวนเงิน (บาท)</td></tr>';
+        payments.forEach(function(p) {
+          body += '<tr><td>ชำระโดย: <b>' + esc_(p.methodLabel) + '</b>' + (p.detail ? '<br><span style="font-size:10px">' + esc_(p.detail) + '</span>' : '') + '</td>' +
+            '<td style="text-align:center">' + esc_(p.payDate) + '</td>' +
+            '<td style="text-align:right">' + thaiMoney_(p.amount) + '</td></tr>';
+        });
+        body += '<tr><td colspan="2" style="text-align:right;font-weight:bold;color:' + th.main + '">ชำระแล้วทั้งหมด</td>' +
+          '<td style="text-align:right;font-weight:bold;color:' + th.main + '">' + thaiMoney_(paidSum) + '</td></tr></table>';
+      }
       body += '<table style="width:100%;margin-top:10px;font-size:12px"><tr>' +
         '<td style="vertical-align:top;width:55%"><b>หมายเหตุ:</b> ' + esc_(doc.notes || '-') +
         (doc.docType === 'QT' ? '<br>กำหนดส่งมอบ: ' + doc.sendDays + ' วัน | กำหนดยืนราคา: ' + doc.confirmDays + ' วัน' : '') + '</td>' +
