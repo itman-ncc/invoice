@@ -866,12 +866,23 @@ function renderPrintPreview(doc) {
     if (!pages.length) pages.push([]);
     const totalPages = pages.length;
 
-    /* ตราท้ายเอกสาร: วัน.เดือน.ปี(พ.ศ.).เวลา | ผู้บันทึก/แก้ไข/จัดพิมพ์ */
-    const creatorName = doc.createdByName || doc.createdBy || '';
+    /* ตราท้ายเอกสาร: วัน.เดือน.ปี(พ.ศ.).เวลา | ผู้บันทึก(user login)/แก้ไข/จัดพิมพ์ล่าสุด */
+    const creatorLogin = doc.createdBy || '';
+    const creatorName = doc.createdByName || creatorLogin;
     const stampParts = [];
-    if (creatorName) stampParts.push('บันทึก: ' + creatorName);
-    if (doc.updatedByName && doc.updatedByName !== creatorName) stampParts.push('แก้ไข: ' + doc.updatedByName);
-    stampParts.push('จัดพิมพ์: ' + (USER.fullName || USER.name || '-'));
+    if (creatorName) {
+        stampParts.push('บันทึก: ' + creatorName + (creatorLogin ? ' (' + creatorLogin + ')' : ''));
+    }
+    if (doc.updatedByName && doc.updatedByName !== creatorName) {
+        stampParts.push('แก้ไข: ' + doc.updatedByName);
+    }
+    const lp = (!doc.isSample && doc.lastPrint && doc.lastPrint.by) ? doc.lastPrint : null;
+    if (lp) {
+        const lpAt = fmtDotTH(new Date(String(lp.at).replace(' ', 'T')));
+        stampParts.push('จัดพิมพ์ล่าสุด: ' + lp.by + ' ' + lpAt);
+    } else {
+        stampParts.push('จัดพิมพ์ล่าสุด: ' + (USER.fullName || USER.name || '-') + ' (' + fmtDotTH(new Date()) + ')');
+    }
     const printStamp = fmtDotTH(new Date()) + ' | ' + stampParts.join(' / ');
 
     const container = document.getElementById('a4-render-area');

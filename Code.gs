@@ -674,6 +674,19 @@ function itemsOf_(docNo) {
 function listDocuments_() {
   const docs = rawDocuments_();
   docs.forEach(function(d) { d.items = itemsOf_(d.docNo); });
+
+  /* หา "จัดพิมพ์ล่าสุด" ต่อเอกสารจาก AuditLogs (Print / ExportPDF) */
+  const prints = {};
+  readAll_('AuditLogs').forEach(function(r) {
+    const act = String(r[2]);
+    if (act !== 'Print' && act !== 'ExportPDF') return;
+    const dn = String(r[3]);
+    if (!dn || dn === '-') return;
+    const at = r[0] instanceof Date ? fmtDateTime_(r[0]) : String(r[0]);
+    if (!prints[dn] || at > prints[dn].at) prints[dn] = { by: String(r[1]), at: at };
+  });
+  docs.forEach(function(d) { d.lastPrint = prints[d.docNo] || null; });
+
   docs.sort(function(a, b) { return b.createdAt.localeCompare(a.createdAt); });
   return docs;
 }
