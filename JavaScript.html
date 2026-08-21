@@ -1346,7 +1346,12 @@ function renderPrintPreview(doc) {
                 <td class="py-1.5 px-2 text-center font-mono">${fmtShort(it.qty)}</td>
                 <td class="py-1.5 px-2 text-right font-mono">${fmt(it.unitPrice)}</td>
                 <td class="py-1.5 px-2 text-right font-mono font-semibold">${fmt(it.totalPrice)}</td>
-            </tr>`).join('');
+            </tr>`).join('')
+            /* แถวปิดท้าย: แสดงว่ารายการสินค้าจบครบทุกรายการแล้ว (หน้าสุดท้ายเท่านั้น) */
+            + (isLast ? `
+            <tr>
+                <td colspan="6" class="py-1.5 px-2 text-center text-[10px] font-bold tracking-[0.35em] text-slate-400 border-t-2 border-slate-300">END-OF-ORDER</td>
+            </tr>` : '');
 
         let signHtml = '';
         if (isLast) {

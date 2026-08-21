@@ -1494,6 +1494,10 @@ function buildStandaloneHtml_(doc, items, st, payments) {
         '<td style="text-align:right">' + thaiMoney_(it.unitPrice) + '</td>' +
         '<td style="text-align:right">' + thaiMoney_(it.totalPrice) + '</td></tr>';
     });
+    /* แถวปิดท้าย: รายการสินค้าจบครบทุกรายการ (หน้าสุดท้ายเท่านั้น) */
+    if (isLast) {
+      body += '<tr style="background:#ffffff"><td colspan="5" style="text-align:center;font-size:10px;font-weight:bold;letter-spacing:3px;color:#94a3b8;border-top:2px solid ' + th.mid + '">END-OF-ORDER</td></tr>';
+    }
     body += '</table>';
 
     if (isLast) {
