@@ -526,14 +526,15 @@ function startCashSale() {
 
 /* ============================================================
  * CKEDITOR — คำชี้แจงการยื่นเสนอราคา (QT)
- * ใช้เวอร์ชันโอเพนซอร์สฟรี (GPL) จาก github.com/ckeditor/ckeditor4
- * ผ่าน npm mirror: jsdelivr ← หลัก / unpkg ← สำรองอัตโนมัติ
+ * ใช้เวอร์ชันฟรี (GPL) ล่าสุด = 4.22.1 — เวอร์ชัน 4.23+ เป็น LTS
+ * เชิงพาณิชย์ (ต้องมี license key) จึงใช้ไม่ได้กับโปรเจกต์นี้
+ * สำรอง: unpkg (ckeditor4@4.22.1) ← cdn.ckeditor.com
  * ============================================================ */
 function ensureCkeScript(onReady) {
     if (window.CKEDITOR) { onReady(); return; }
     const urls = [
-        'https://cdn.jsdelivr.net/npm/ckeditor4@4.25.2/ckeditor.js',
-        'https://unpkg.com/ckeditor4@4.25.2/ckeditor.js'
+        'https://unpkg.com/ckeditor4@4.22.1/ckeditor.js',
+        'https://cdn.ckeditor.com/4.22.1/standard/ckeditor.js'
     ];
     let i = 0;
     (function next() {
